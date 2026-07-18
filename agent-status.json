@@ -1,0 +1,36 @@
+{
+  "_설명": "이 파일을 수정하면 행성 대시보드의 에이전트 상태가 갱신됩니다. 기본 필드는 state, task, updatedAt이며 progress(0~1), runId, 현재 result, 최신순 results[]를 선택적으로 추가할 수 있습니다. Hermes 브리지는 공개 가능한 runtime 요약만 더하며 전체 SOUL·메모리·프롬프트·도구 인수는 보내지 않습니다.",
+  "_runtime필드": {
+    "health": "healthy | degraded | error | offline",
+    "model/provider": "현재 실행 모델과 제공자 — 공개해도 되는 별칭만",
+    "riskLevel": "L1 | L2 | L3 | L4",
+    "approvalState": "not_required | pending | approved | rejected",
+    "blocker": "공개 가능한 한 줄 블로커",
+    "currentTaskId/lastActivityAt": "Task Graph 연결 키와 마지막 활동 시각",
+    "cost": "{ amount, currency } — 선택, 공개 정책이 정해진 경우만"
+  },
+  "rodi": {
+    "state": "대기 중",
+    "task": "팀 조율"
+  },
+  "jarvis": {
+    "state": "대기 중",
+    "task": "기록 정리"
+  },
+  "yul": {
+    "state": "대기 중",
+    "task": "코드 담금질"
+  },
+  "ludwig": {
+    "state": "대기 중",
+    "task": "검증 대기"
+  },
+  "anne": {
+    "state": "대기 중",
+    "task": "스케치"
+  },
+  "argos": {
+    "state": "대기 중",
+    "task": "웹 관측"
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "_설명": "집의 최근 결과 탭에 표시하는 공개용 정적 샘플입니다. 배포 후에는 Hermes 브리지가 같은 필드만 정제해 제공하며 SOUL, 프롬프트, 로그, 로컬 경로는 포함하지 않습니다.",
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-17T00:00:00+09:00",
+  "source": "curated-static",
+  "agents": {
+    "rodi": [
+      {
+        "id": "rodi-p0-priority-20260717",
+        "kind": "briefing",
+        "status": "ready",
+        "title": "P0 관제 우선순위",
+        "summary": "결과 공간, 라벨 정리, 집중 카메라, 역할 행동을 한 흐름으로 정리했습니다.",
+        "updatedAt": "2026-07-17T00:00:00+09:00"
+      },
+      {
+        "id": "rodi-team-contract-20260711",
+        "kind": "decision",
+        "status": "ready",
+        "title": "Rodi Team 실행 계약",
+        "summary": "6인 역할과 승인·검증·핸드오프 경계를 공개 대시보드용으로 정돈했습니다.",
+        "updatedAt": "2026-07-11T00:00:00+09:00"
+      }
+    ],
+    "jarvis": [
+      {
+        "id": "jarvis-ops-checklist-20260717",
+        "kind": "operations",
+        "status": "ready",
+        "title": "Mini Planet 운영 체크리스트",
+        "summary": "개발 모드, 서비스워커 캐시, 6채 집 회귀 검증 순서를 운영 기준으로 묶었습니다.",
+        "updatedAt": "2026-07-17T00:00:00+09:00"
+      },
+      {
+        "id": "jarvis-status-polling-20260711",
+        "kind": "operations",
+        "status": "ready",
+        "title": "60초 상태 폴링 계약",
+        "summary": "정적 배포에서도 상태 파일을 안전하게 갱신하는 기본 운영 흐름입니다.",
+        "updatedAt": "2026-07-11T00:00:00+09:00"
+      }
+    ],
+    "yul": [
+      {
+        "id": "yul-character-polish-20260712",
+        "kind": "build",
+        "status": "ready",
+        "title": "캐릭터 아트 폴리싱 3차",
+        "summary": "여섯 공명자의 실루엣과 역할 소품, 접지 그림자를 다듬었습니다.",
+        "updatedAt": "2026-07-12T00:00:00+09:00"
+      },
+      {
+        "id": "yul-code-modules-20260712",
+        "kind": "build",
+        "status": "ready",
+        "title": "상태·하늘 모듈 분리",
+        "summary": "상태 소스와 천체 시스템을 메인 씬에서 분리해 다음 연동을 단순하게 만들었습니다.",
+        "updatedAt": "2026-07-12T00:00:00+09:00"
+      }
+    ],
+    "ludwig": [
+      {
+        "id": "ludwig-home-regression-20260717",
+        "kind": "verification",
+        "status": "ready",
+        "title": "집 6채 서비스 회귀 검증",
+        "summary": "문 앞 접근과 집 클릭이 각 소유자의 서비스 패널로 이어지는지 점검했습니다.",
+        "updatedAt": "2026-07-17T00:00:00+09:00"
+      },
+      {
+        "id": "ludwig-public-boundary-20260711",
+        "kind": "verification",
+        "status": "ready",
+        "title": "공개 데이터 경계 검토",
+        "summary": "브라우저에는 정제된 상태와 결과만 노출하도록 개인정보·실행 정보 경계를 확인했습니다.",
+        "updatedAt": "2026-07-11T00:00:00+09:00"
+      }
+    ],
+    "anne": [
+      {
+        "id": "anne-harbor-direction-20260717",
+        "kind": "content",
+        "status": "ready",
+        "title": "Harbor Village 아트 방향",
+        "summary": "현대 한국 어촌의 여백과 파스텔 톤 셰이딩을 중심으로 시각 위계를 정리했습니다.",
+        "updatedAt": "2026-07-17T00:00:00+09:00"
+      },
+      {
+        "id": "anne-celestial-polish-20260712",
+        "kind": "content",
+        "status": "ready",
+        "title": "천체 존재감 폴리싱",
+        "summary": "달·태양·북극성이 장식 표식이 아니라 먼 하늘의 일부로 읽히도록 조율했습니다.",
+        "updatedAt": "2026-07-12T00:00:00+09:00"
+      }
+    ],
+    "argos": [
+      {
+        "id": "argos-hermes-boundary-20260717",
+        "kind": "research",
+        "status": "review",
+        "title": "Hermes 연동 경계 조사",
+        "summary": "배포 후 Mac mini 브리지가 제공할 읽기 전용 공개 스냅샷 경계를 정리했습니다.",
+        "updatedAt": "2026-07-17T00:00:00+09:00"
+      },
+      {
+        "id": "argos-reference-notes-20260711",
+        "kind": "research",
+        "status": "ready",
+        "title": "레퍼런스 관찰 요약",
+        "summary": "월드 우선 화면, 종이 같은 UI, 절제된 움직임을 미니 플래닛에 맞게 추렸습니다.",
+        "updatedAt": "2026-07-11T00:00:00+09:00"
+      }
+    ]
+  }
+}

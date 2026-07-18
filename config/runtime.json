@@ -1,0 +1,13 @@
+{
+  "_설명": "런타임 연동 설정. 현재는 정적 상태 파일을 읽고, 맥미니 헤르메스 브리지가 준비되면 mode와 URL만 변경합니다.",
+  "status": {
+    "mode": "poll",
+    "snapshotUrl": "agent-status.json",
+    "eventUrl": "",
+    "pollMs": 60000,
+    "reconnectMs": 15000
+  },
+  "results": {
+    "snapshotUrl": "agent-results.json"
+  }
+}

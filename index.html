@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#81bfbc" />
+<meta name="description" content="여섯 AI 에이전트의 작업 상태와 결과물을 보여주는 인터랙티브 3D 항구 행성 대시보드." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Handul Mini Planet" />
+<meta property="og:description" content="여섯 AI 에이전트의 작업 상태와 결과물을 보여주는 인터랙티브 3D 항구 행성 대시보드." />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Handul Mini Planet" />
+<meta name="twitter:description" content="여섯 AI 에이전트의 작업 상태와 결과물을 보여주는 인터랙티브 3D 항구 행성 대시보드." />
+
+<!-- Content Security Policy (delivered via meta since static hosts can't set headers).
+     Allows: our own files, the Three.js CDN (unpkg), Google Fonts, and the
+     Open-Meteo weather API. No eval, no arbitrary remote scripts. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'unsafe-inline' https://unpkg.com;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data: blob:;
+  connect-src 'self' https://unpkg.com https://api.open-meteo.com http://localhost:* http://127.0.0.1:*;
+  frame-src 'self' http://localhost:* http://127.0.0.1:*;
+  worker-src 'self' blob:;
+  base-uri 'self';
+  object-src 'none';
+  frame-ancestors 'none';
+" />
+
+<title>Handul Mini Planet — Hermes Agent Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='35%25' cy='30%25' r='70%25'%3E%3Cstop offset='0%25' stop-color='%23b6e6bd'/%3E%3Cstop offset='70%25' stop-color='%2381bfbc'/%3E%3Cstop offset='100%25' stop-color='%235fa3a0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='25' fill='url(%23g)'/%3E%3Cpath d='M18 37c7 4 17 5 28-2' fill='none' stroke='%2336514f' stroke-width='4' stroke-linecap='round' opacity='.45'/%3E%3C/svg%3E" />
+<link rel="manifest" href="manifest.json" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
+<link id="appStyles" rel="stylesheet" href="src/style.css?v=65" />
+<script>
+  if (new URLSearchParams(location.search).has('dev')) {
+    document.getElementById('appStyles').href = `src/style.css?dev=${Date.now()}`;
+  }
+</script>
+</head>
+<body class="intro-active">
+<div id="app"></div>
+<div class="world-labels" id="worldLabels" aria-hidden="true"></div>
+<noscript>
+  <div class="fallback card">이 행성은 WebGL과 JavaScript가 필요합니다. 브라우저 설정에서 JavaScript를 켜고 다시 열어주세요.</div>
+</noscript>
+
+<!-- Public landing: the live 3D planet stays visible behind this lightweight title layer. -->
+<div id="intro">
+  <div class="intro-content">
+    <div class="intro-kicker" id="introKicker">A LIVING AGENT VILLAGE</div>
+    <h1 id="introTitle"><span>HANDUL</span><span>MINI PLANET</span></h1>
+    <p id="introDescription">여섯 공명자가 일하고 결과를 쌓아가는 작은 항구 행성. 관제 화면에서 상태와 작업물을 천천히 지켜보세요.</p>
+    <div class="intro-actions">
+      <button class="start" id="startBtn" disabled>행성 빚는 중…</button>
+      <button class="dashboard-enter" id="exploreModeBtn" disabled>직접 산책하기</button>
+    </div>
+    <details class="intro-tools">
+      <summary>행성 관리</summary>
+      <button class="edit-enter" id="editModeBtn">✏️ 편집 모드</button>
+    </details>
+    <div class="loading" id="introLoading" aria-live="polite"></div>
+    <button class="boot-retry" id="bootRetryBtn" type="button" hidden>다시 불러오기</button>
+  </div>
+  <div class="intro-hint"><span>CLICK</span> 에이전트 보기 <i></i><span>WASD / 방향키</span> 직접 산책</div>
+</div>
+
+<div class="ui" aria-hidden="true" inert>
+  <div class="hud card">
+    <div class="brand"><span class="dot"></span> HANDUL MINI PLANET</div>
+    <div class="task">에이전트의 <b>상태와 작업</b>을 지켜보세요. 에이전트 카드는 현재 일, 집은 연결된 <b>결과 서비스</b>를 보여줍니다.</div>
+    <div class="mode-switch" aria-label="화면 모드">
+      <button id="dashboardModeBtn" class="active" aria-pressed="true">관제</button>
+      <button id="exploreModeSwitchBtn" aria-pressed="false">탐험</button>
+      <button id="editModeSwitchBtn" aria-pressed="false">편집</button>
+    </div>
+  </div>
+  <div class="help card">
+    <kbd>WASD / ↑↓←→</kbd> 이동<span class="sep">·</span><kbd>Space</kbd> 점프<span class="sep">·</span><kbd>F</kbd> 입장<span class="sep">·</span>드래그 시점<span class="sep">·</span><kbd>휠</kbd> 줌
+  </div>
+
+  <!-- compact weather + local time chip (top-right) -->
+  <div class="weather card" id="weather">
+    <span class="wx-icon" id="wxIcon">⏳</span>
+    <span class="wx-temp" id="wxTemp">--°</span>
+    <span class="wx-time" id="wxTime">--:--</span>
+    <button class="sound-toggle" id="soundToggle" type="button" aria-label="환경음 켜기" aria-pressed="false" title="환경음 켜기">♬</button>
+  </div>
+
+  <!-- Reference-inspired paper controls: quiet by default, useful on demand. -->
+  <div class="visitor-rail" aria-label="방문자 메뉴">
+    <button id="guideToggle" aria-label="방문 안내 열기" aria-expanded="false">☷</button>
+    <button id="appearanceToggle" aria-label="캐릭터 꾸미기 열기" aria-expanded="false">♟</button>
+    <button id="editModeQuickBtn" aria-label="행성 편집 모드 열기" title="행성 편집">✎</button>
+  </div>
+
+  <aside class="paper-panel visitor-guide" id="visitorGuide" hidden aria-labelledby="guideTitle">
+    <button class="paper-close" id="guideClose" aria-label="방문 안내 닫기">✕</button>
+    <div class="paper-kicker">VISITOR CHECKLIST</div>
+    <h2 id="guideTitle">작은 행성 둘러보기</h2>
+    <ol class="visit-list">
+      <li data-visit="explore"><span class="visit-check">1</span><span><b>행성을 산책하기</b><small>탐험 모드에서 마을을 둘러보세요.</small></span></li>
+      <li data-visit="agent"><span class="visit-check">2</span><span><b>공명자 만나기</b><small>에이전트를 눌러 현재 상태를 확인하세요.</small></span></li>
+      <li data-visit="service"><span class="visit-check">3</span><span><b>서비스 문 열기</b><small>집을 누르거나 문 앞에서 F를 누르세요.</small></span></li>
+    </ol>
+    <div class="visit-progress"><span id="visitProgressText">0 / 3 완료</span><i><b id="visitProgressBar"></b></i></div>
+    <nav class="public-links" id="publicLinks" hidden aria-label="외부 링크">
+      <a id="homepageLink" hidden>홈페이지 ↗</a>
+      <a id="githubLink" hidden>GitHub ↗</a>
+    </nav>
+  </aside>
+
+  <aside class="paper-panel appearance-panel" id="appearancePanel" hidden aria-labelledby="appearanceTitle">
+    <button class="paper-close" id="appearanceClose" aria-label="꾸미기 닫기">✕</button>
+    <div class="paper-kicker">YOUR RESONATOR</div>
+    <h2 id="appearanceTitle">여행자 색상</h2>
+    <p>행성을 걷는 한들의 재킷 색을 고르세요.</p>
+    <div class="avatar-swatches" role="group" aria-label="재킷 색상">
+      <button data-avatar-color="ff9e80" aria-label="산호색"></button>
+      <button data-avatar-color="e8896b" aria-label="주황색"></button>
+      <button data-avatar-color="5b7c99" aria-label="슬레이트색"></button>
+      <button data-avatar-color="62a69a" aria-label="청록색"></button>
+      <button data-avatar-color="8e78b5" aria-label="보라색"></button>
+    </div>
+  </aside>
+  <div class="emojibar" id="emojibar" aria-label="감정 표현">
+    <button data-e="👋" aria-label="손 흔들기">👋</button>
+    <button data-e="❤️" aria-label="하트 보내기">❤️</button>
+    <button data-e="😄" aria-label="웃기">😄</button>
+    <button data-e="🎉" aria-label="축하하기">🎉</button>
+  </div>
+  <div class="stick" id="stick" role="group" aria-label="이동 조이스틱"><div class="knob" id="knob"></div></div>
+
+  <!-- ===== Edit mode UI (hidden until edit mode is on) ===== -->
+  <div class="editor" id="editorBar" role="region" aria-label="행성 편집 도구" aria-hidden="true" inert>
+    <div class="editor-head">
+      <div class="editor-heading">
+        <div class="editor-title">✏️ 행성 편집</div>
+        <div class="editor-save-state" id="editorSaveState" role="status" aria-live="polite">저장 준비</div>
+      </div>
+      <div class="editor-actions">
+        <button class="ed-btn editor-history" id="editUndoBtn" disabled title="실행 취소 (Ctrl/⌘+Z)" aria-label="마지막 편집 실행 취소">↶</button>
+        <button class="ed-btn editor-history" id="editRedoBtn" disabled title="다시 실행 (Ctrl/⌘+Shift+Z)" aria-label="마지막 편집 다시 실행">↷</button>
+        <button class="ed-btn editor-collapse" id="editorCollapseBtn" aria-expanded="true" aria-controls="editorBody">도구 접기</button>
+        <button class="ed-btn ed-done" id="editExitBtn" title="편집 끝내고 플레이">✓ 완료</button>
+      </div>
+    </div>
+
+    <div class="editor-body" id="editorBody">
+      <div class="editor-tabs" role="tablist" aria-label="편집 도구 종류">
+        <button class="active" id="editorObjectsTab" role="tab" aria-selected="true" aria-controls="editorObjectsPanel">오브젝트</button>
+        <button id="editorTerrainTab" role="tab" aria-selected="false" aria-controls="editorTerrainPanel" tabindex="-1">길 · 지형</button>
+      </div>
+      <p class="editor-context" id="editorContext">카테고리를 열고 오브젝트를 추가한 뒤 행성 위에서 드래그하세요.</p>
+
+      <section class="editor-panel" id="editorObjectsPanel" role="tabpanel" aria-labelledby="editorObjectsTab">
+        <div class="palette" id="palette"></div>
+      </section>
+
+      <section class="editor-panel terrain-panel" id="editorTerrainPanel" role="tabpanel" aria-labelledby="editorTerrainTab" hidden>
+        <div class="editor-tool-section">
+          <div class="editor-tool-title">길과 영역 그리기</div>
+          <p>도구를 고른 뒤 지면을 클릭해 점을 연결하세요.</p>
+          <div class="editor-tool-grid">
+            <button class="pal-btn draw-btn" id="drawRoadBtn">🛣️ 도로</button>
+            <button class="pal-btn draw-btn" id="drawTrailBtn">🛤️ 흙길</button>
+            <button class="pal-btn draw-btn" id="drawSnowBtn">❄️ 눈길</button>
+            <button class="pal-btn draw-btn" id="drawRiverBtn">🌊 물길</button>
+            <button class="pal-btn draw-btn" id="drawPondBtn">🏞️ 연못</button>
+            <button class="pal-btn draw-btn" id="drawSandBtn">🏖️ 모래밭</button>
+            <button class="pal-btn draw-btn" id="drawGrassBtn">🌿 풀밭</button>
+          </div>
+        </div>
+        <div class="editor-tool-section editor-view-section">
+          <div class="editor-tool-title">빠른 시점</div>
+          <div class="editor-tool-grid two-columns">
+            <button class="pal-btn" id="camVillageBtn">🏘️ 항구 마을</button>
+            <button class="pal-btn" id="camPoleBtn">🌹 북극 장미</button>
+          </div>
+        </div>
+      </section>
+
+      <details class="editor-manage">
+        <summary>배치 관리</summary>
+        <div class="editor-manage-actions">
+          <button class="ed-btn" id="editExportBtn" title="JSON으로 내보내기">⬇️ 내보내기</button>
+          <button class="ed-btn" id="editImportBtn" title="JSON 불러오기">⬆️ 불러오기</button>
+          <button class="ed-btn" id="editRestoreBtn" title="최근 안전 백업 복구">⏱ 백업 복구</button>
+          <button class="ed-btn danger" id="editResetBtn" title="기본 배치로 초기화">↺ 초기화</button>
+        </div>
+        <p>배치는 브라우저에 자동 저장됩니다. 초기화·불러오기 전에는 최근 5개의 안전 백업도 남습니다.</p>
+      </details>
+
+      <div class="editor-shortcuts"><kbd>WASD / 방향키</kbd> 시점 이동 <span>·</span> 드래그 회전 <span>·</span> 휠 확대 <span>·</span> <kbd>E</kbd> 종료</div>
+    </div>
+    <input type="file" id="editImportInput" accept="application/json,.json" hidden />
+  </div>
+
+  <!-- floating bar shown while drawing a path -->
+  <div class="draw-bar" id="drawBar" aria-hidden="true" inert>
+    <span class="draw-bar-info">점 <b id="drawCount">0</b>개 — 지면을 클릭해 점 찍기</span>
+    <button class="ed-btn ed-done" id="drawDoneBtn" disabled>✓ 완료</button>
+    <button class="ed-btn" id="drawCancelBtn">✕ 취소</button>
+  </div>
+
+  <!-- floating inspector for the selected object -->
+  <div class="inspector" id="inspector" role="region" aria-label="선택한 오브젝트 편집" aria-hidden="true" inert>
+    <span class="insp-name">오브젝트</span>
+    <div class="insp-variants" id="inspVariants"></div>
+    <div class="insp-row">
+      <button class="insp-btn insp-rotL" title="왼쪽 회전 ( [ )" aria-label="왼쪽 회전">⟲</button>
+      <button class="insp-btn insp-rotR" title="오른쪽 회전 ( ] )" aria-label="오른쪽 회전">⟳</button>
+      <button class="insp-btn insp-smaller" title="작게 ( - )" aria-label="작게">－</button>
+      <button class="insp-btn insp-bigger" title="크게 ( + )" aria-label="크게">＋</button>
+      <button class="insp-btn insp-dup" title="복제 (Ctrl+D)" aria-label="복제">⧉</button>
+      <button class="insp-btn insp-del" title="삭제 (Delete)" aria-label="삭제">🗑</button>
+    </div>
+  </div>
+
+  <!-- transient hint toast for edit mode -->
+  <div class="edit-hint" id="editHint"></div>
+
+  <!-- ===== Agent dashboard: team bar (left) + status card ===== -->
+  <div class="agentbar card" id="agentbarWrap">
+    <div class="agentbar-heading">
+      <button class="agentbar-title" id="agentbarToggle" aria-expanded="true">
+        <span id="agentbarName">✦ 별의 공명자들</span><span class="status-connection loading" id="statusConnection">연결 중</span>
+      </button>
+      <button class="status-refresh" id="statusRefreshBtn" type="button" aria-label="에이전트 상태와 결과 새로고침" title="상태 새로고침">↻</button>
+    </div>
+    <div class="status-freshness" id="statusFreshness" role="status" aria-live="polite">첫 상태를 확인하는 중</div>
+    <div id="agentbar"></div>
+    <button class="patrol-toggle" id="patrolToggle" aria-pressed="false" title="에이전트와 집을 차례로 비춥니다">
+      <span><i></i> 자동 순회</span>
+      <small id="patrolState">꺼짐</small>
+    </button>
+    <button class="team-overview-btn" id="teamOverviewBtn" aria-expanded="false" aria-controls="teamOverviewPanel">
+      <span>⌁ 팀 흐름</span>
+      <b id="teamApprovalBadge" hidden>0</b>
+    </button>
+    <button class="recent-results-btn" id="recentResultsBtn" hidden>
+      <span>◇ 최근 결과</span>
+      <small id="recentResultsState">새 결과 없음</small>
+      <b id="recentResultsBadge" hidden>0</b>
+    </button>
+  </div>
+
+  <div class="agent-card card" id="agentCard" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="agentName" inert>
+    <button class="agent-close" id="agentCardClose" aria-label="에이전트 카드 닫기">✕</button>
+    <div class="agent-head">
+      <span class="agent-dot" id="agentDot"></span>
+      <div>
+        <div class="agent-name" id="agentName">Agent</div>
+        <div class="agent-fantasy" id="agentFantasy"></div>
+      </div>
+    </div>
+    <div class="agent-role" id="agentRole"></div>
+    <div class="agent-soul" id="agentSoul"></div>
+    <div class="agent-tagline" id="agentTagline"></div>
+    <div class="agent-contract" aria-label="에이전트 실행 계약">
+      <span id="agentChannel"></span>
+      <span id="agentAutonomy"></span>
+    </div>
+    <div class="agent-responsibilities" id="agentResponsibilities" aria-label="핵심 책임"></div>
+    <details class="agent-profile-notes" id="agentProfileNotes">
+      <summary>PERSONA NOTES</summary>
+      <div><b>VOICE</b><span id="agentVoiceTraits"></span></div>
+      <div><b>VALUES</b><span id="agentValues"></span></div>
+      <div><b>HOME</b><span id="agentResultSpace"></span></div>
+    </details>
+    <div class="agent-status-row">
+      <span class="agent-state" id="agentState">대기 중</span>
+      <span class="agent-task" id="agentTask">—</span>
+      <span class="agent-updated" id="agentUpdated"></span>
+    </div>
+    <div class="agent-runtime" id="agentRuntime" aria-label="Hermes 런타임 정보" hidden>
+      <span id="agentHealth"></span>
+      <span id="agentModel"></span>
+      <span id="agentRisk"></span>
+      <span id="agentCost"></span>
+    </div>
+    <div class="agent-alert" id="agentAlert" role="status" hidden>
+      <strong id="agentAlertTitle"></strong>
+      <span id="agentAlertBody"></span>
+    </div>
+    <div class="agent-progress" id="agentProgress" hidden>
+      <span><b id="agentProgressText">0%</b> 진행</span>
+      <i><b id="agentProgressBar"></b></i>
+    </div>
+    <a class="agent-result" id="agentResult" target="_blank" rel="noopener noreferrer" hidden>
+      <span>RECENT RESULT ↗</span>
+      <strong id="agentResultTitle"></strong>
+      <small id="agentResultSummary"></small>
+    </a>
+    <button class="agent-service-btn" id="agentServiceBtn" hidden>🏠 서비스 보기</button>
+  </div>
+
+  <section class="team-panel card" id="teamOverviewPanel" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="teamOverviewTitle" inert>
+    <button class="agent-close" id="teamOverviewClose" aria-label="팀 흐름 닫기">✕</button>
+    <header class="team-panel-head">
+      <div>
+        <div class="team-panel-kicker">RODI TEAM · READ ONLY</div>
+        <h2 id="teamOverviewTitle">팀 흐름</h2>
+      </div>
+      <span class="team-panel-source" id="teamPanelSource">정적 상태</span>
+    </header>
+    <p class="team-panel-summary" id="teamPanelSummary"></p>
+
+    <div class="team-metrics" aria-label="팀 요약">
+      <div><span>TEAM</span><strong id="teamMetricAgents">6</strong><small>agents</small></div>
+      <div><span>ACTIVE</span><strong id="teamMetricActive">0</strong><small>now</small></div>
+      <div><span>APPROVAL</span><strong id="teamMetricApprovals">0</strong><small>pending</small></div>
+      <div><span>HEALTH</span><strong id="teamMetricHealth">준비</strong><small>runtime</small></div>
+    </div>
+
+    <section class="team-section" aria-labelledby="teamHandoffTitle">
+      <div class="team-section-head">
+        <h3 id="teamHandoffTitle">HANDOFF ROUTES</h3>
+        <span>역할 계약</span>
+      </div>
+      <div class="team-handoffs" id="teamHandoffs"></div>
+    </section>
+
+    <div class="team-columns">
+      <section class="team-section team-task-section" aria-labelledby="teamTaskTitle">
+        <div class="team-section-head">
+          <h3 id="teamTaskTitle">TASK FLOW</h3>
+          <span id="teamTaskCount">0 tasks</span>
+        </div>
+        <div class="team-task-list" id="teamTaskList"></div>
+      </section>
+      <section class="team-section team-approval-section" aria-labelledby="teamApprovalTitle">
+        <div class="team-section-head">
+          <h3 id="teamApprovalTitle">APPROVAL INBOX</h3>
+          <span>L4 read only</span>
+        </div>
+        <div class="team-approval-list" id="teamApprovalList"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===== House services: doorstep prompt + service panel ===== -->
+  <button class="enter-prompt card" id="enterPrompt" aria-hidden="true" tabindex="-1" inert></button>
+
+  <div class="service-panel card" id="servicePanel" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="serviceName" inert>
+    <button class="agent-close" id="serviceClose" aria-label="서비스 패널 닫기">✕</button>
+    <div class="service-head">
+      <span class="service-icon" id="serviceIcon">🏠</span>
+      <div>
+        <div class="service-name" id="serviceName">서비스</div>
+        <div class="service-owner" id="serviceOwner"></div>
+      </div>
+      <span class="service-online planned" id="serviceOnline">준비 중</span>
+    </div>
+    <div class="service-tabs" role="tablist" aria-label="집 공간 보기">
+      <button class="active" id="serviceTabBtn" role="tab" aria-selected="true" aria-controls="servicePane">서비스</button>
+      <button id="resultsTabBtn" role="tab" aria-selected="false" aria-controls="resultsPane" tabindex="-1">
+        최근 결과 <b id="resultTabCount">0</b>
+      </button>
+    </div>
+    <section class="service-pane" id="servicePane" role="tabpanel" aria-labelledby="serviceTabBtn">
+      <div class="service-desc" id="serviceDesc"></div>
+      <div class="service-note" id="serviceNote" hidden></div>
+      <div class="service-frame" id="serviceFrameWrap" hidden></div>
+      <div class="service-actions">
+        <button class="service-open" id="serviceOpenBtn" hidden>새 창에서 열기 ↗</button>
+      </div>
+    </section>
+    <section class="service-pane result-space" id="resultsPane" role="tabpanel" aria-labelledby="resultsTabBtn" hidden>
+      <div class="result-space-head">
+        <div>
+          <div class="result-space-kicker">AGENT HOME ARCHIVE</div>
+          <h3 id="resultSpaceName">작은 결과 공간</h3>
+        </div>
+        <span id="resultSpaceCount">0 / 6</span>
+      </div>
+      <p id="resultSpaceSummary"></p>
+      <div class="home-result-list" id="homeResultList"></div>
+    </section>
+  </div>
+</div>
+
+<div class="app-notice card" id="appNotice" role="status" aria-live="polite" hidden>
+  <span id="appNoticeText"></span>
+  <button id="appNoticeAction" type="button" hidden></button>
+</div>
+
+<script>
+  function showMiniPlanetBootError() {
+    for (const id of ['startBtn', 'exploreModeBtn']) {
+      const button = document.getElementById(id);
+      if (button) { button.disabled = true; button.textContent = '새로고침 필요'; }
+    }
+    const loading = document.getElementById('introLoading');
+    if (loading) {
+      loading.textContent = '3D 모듈을 불러오지 못했습니다. 네트워크를 확인한 뒤 페이지를 새로고침해주세요.';
+      loading.classList.add('error');
+    }
+    const retry = document.getElementById('bootRetryBtn');
+    if (retry) retry.hidden = false;
+  }
+  // surface a friendly message if the 3D module fails to load (e.g. CDN/network down)
+  window.addEventListener('error', (event) => {
+    const isScriptLoadError = event.target && event.target.tagName === 'SCRIPT';
+    const startBtn = document.getElementById('startBtn');
+    if (!isScriptLoadError || !startBtn || !startBtn.disabled) return;
+    showMiniPlanetBootError();
+  }, true);
+  window.addEventListener('mini-planet-load-error', showMiniPlanetBootError);
+  document.getElementById('bootRetryBtn')?.addEventListener('click', () => location.reload());
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+  const dev = new URLSearchParams(location.search).has('dev');
+  import(`./src/main.js?${dev ? `dev=${Date.now()}` : 'v=65'}`)
+    .catch((error) => {
+      console.error('Mini Planet boot failed', error);
+      window.dispatchEvent(new Event('mini-planet-load-error'));
+    });
+</script>
+
+<!-- register the service worker for offline caching (progressive enhancement).
+     Skipped with ?dev=1 so development always loads fresh code. -->
+<script>
+  if ('serviceWorker' in navigator) {
+    const dev = new URLSearchParams(location.search).has('dev');
+    window.addEventListener('load', () => {
+      if (dev) {
+        const appScope = new URL('./', location.href).href;
+        navigator.serviceWorker.getRegistrations().then((registrations) =>
+          Promise.all(registrations
+            .filter((registration) => registration.scope === appScope)
+            .map((registration) => registration.unregister()))
+        ).catch(() => {});
+      } else {
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((registration) => {
+          registration.addEventListener('updatefound', () => {
+            const worker = registration.installing;
+            worker?.addEventListener('statechange', () => {
+              if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                window.dispatchEvent(new Event('mini-planet-update-ready'));
+              }
+            });
+          });
+        }).catch(() => {});
+      }
+    });
+  }
+</script>
+</body>
+</html>

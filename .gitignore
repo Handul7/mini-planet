@@ -1,0 +1,13 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local preview config (not needed for deployment)
+.claude/
+
+# Logs
+*.log
