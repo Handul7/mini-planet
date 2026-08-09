@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three/build/three.module.min.js';
 
 const AGENT_ACTIVITY_STYLES = new Set([
   'conductor',

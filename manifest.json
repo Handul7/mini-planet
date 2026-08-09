@@ -1,7 +1,7 @@
 {
   "name": "Handul Mini Planet",
   "short_name": "Mini Planet",
-  "description": "A tiny low-poly 3D planet — a living dashboard for the Hermes agent team, with live weather and a real-phase moon.",
+  "description": "A tiny low-poly 3D planet with a clearly labeled public demo of the Hermes agent dashboard, live weather, and a real-phase moon.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

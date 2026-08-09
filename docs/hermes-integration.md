@@ -1,232 +1,177 @@
 # Hermes Agent integration boundary
 
-Mini Planet is prepared for Hermes, but it is **not connected yet**. The final
-connection belongs on the Mac mini after the public site and agent profiles are
-ready. This keeps the static site deployable to GitHub Pages and prevents a
-Hermes bearer key from ever reaching browser code.
+Mini Planet은 Hermes 연동을 받을 준비가 된 공개 observer지만 기본 배포는
+**정적 데모이며 아직 Hermes에 연결되지 않았다**. Hermes bearer와 raw 운영 데이터는
+브라우저에 절대 전달하지 않는다.
 
-## Architecture decision
+## Architecture
 
 ```text
-public browser
-  └─ GET /api/agents/snapshot  or  /api/agents/events (read-only, sanitized)
-       └─ Mini Planet bridge on the Mac mini
-            ├─ GET /v1/capabilities and /health/detailed
-            └─ Hermes profile APIs on 127.0.0.1 (Bearer key stays here)
+[Private Mac mini]
+Hermes profiles / gateways / Kanban / runs / logs
+                  |
+                  | raw object 전달 금지
+                  v
+Private public-projection bridge
+- deny-by-default allowlist serializer
+- private profile key -> public agent key alias registry
+- publication review / freshness / provenance
+- rate limit / timeout / output cap / audit
+                  |
+                  | same-origin read-only HTTPS DTO
+                  v
+[Public Mini Planet]
+/api/agents/snapshot or /api/agents/events
 ```
 
-Do **not** point `config/runtime.json` at `http://127.0.0.1:8642` and do not put
-`API_SERVER_KEY` in JavaScript, JSON shipped with the site, GitHub secrets used
-at build time, or an `EventSource` URL. Hermes documents that its API grants the
-agent's full toolset, including terminal and file operations.
+`config/runtime.json`을 Hermes loopback API에 직접 연결하거나 bearer를 JavaScript,
+공개 JSON, EventSource URL에 넣지 않는다. Hermes API는 terminal과 file tool을
+사용할 수 있으므로 public browser와 같은 신뢰 영역에 둘 수 없다.
 
-The bridge is intentionally small. It discovers supported Hermes features from
-`GET /v1/capabilities`, monitors `GET /health/detailed`, reads run state from
-`GET /v1/runs/{run_id}` or its SSE stream, and emits only the public contract
-below. Raw prompts, tool arguments, terminal output, memory, approvals, and API
-keys never pass through it.
+## Private profile setup
 
-## Hermes profiles: one agent, one isolated state directory
+여섯 agent는 Mac mini에서 각자 독립 Hermes profile을 가진다. profile마다 config,
+environment, SOUL, session, memory, skills, cron, gateway state를 분리한다. Profile
+isolation은 filesystem sandbox가 아니므로 OS/container 정책은 별도로 적용한다.
 
-Hermes profiles are the right mapping for the six Mini Planet agents. Each
-profile has its own config, environment, `SOUL.md`, sessions, memory, skills,
-cron jobs, and gateway state.
-
-| Mini Planet input | Hermes destination |
+| Public Mini Planet | Private Hermes |
 | --- | --- |
-| `config/agents.json` `key` | stable profile id and bridge mapping key |
-| role / responsibility | `hermes profile create <key> --description "..."` |
-| durable identity, voice, temperament | profile `SOUL.md` |
-| repo rules, paths, commands, workflow | project `AGENTS.md` |
-| permitted starting workspace | explicit absolute `terminal.cwd` |
+| public agent `key` | private alias registry를 통해 profile key에 매핑 |
+| role/responsibility summary | owner-reviewed profile description |
+| public identity summary | full private `SOUL.md`에서 별도 출판 |
+| public autonomy summary | private `AGENTS.md` 실행 계약에서 별도 출판 |
+| home/result metadata | public artifact registry projection |
 
-Profiles isolate state, **not filesystem access**. `terminal.cwd` makes the
-starting folder predictable but is not a sandbox. Apply OS/container policy
-separately if an agent needs a real access boundary. Start a new session after
-changing `SOUL.md` so the identity is reloaded cleanly.
+Public repository에 profile key, absolute path, local port, Discord ID/channel,
+gateway nickname을 기록하지 않는다. `config/agents.json`의 짧은 설명을 이용해
+full SOUL을 역생성하지 않는다.
 
-The public role map, handoffs, and safety boundaries are now normalized in
-`config/agents.json` from the Rodi Team blueprint. That file is a public
-projection, not a replacement for the complete Hermes profile sources. Create
-or update the six real profiles on the Mac mini only after the owner-reviewed
-`SOUL.md` and `AGENTS.md` files are present there. Never reconstruct a full
-SOUL by expanding the short website summary.
+각 profile API는 loopback 전용 host, 서로 다른 private port, 서로 다른 secret을
+사용한다. Bridge만 capabilities, detailed health, run state를 읽는다. Public Mini
+Planet은 run/stop/approve endpoint를 갖지 않는다.
 
-## Mac mini API setup (later)
+## Serializer rules
 
-For each profile, use a unique loopback port and secret in that profile's
-`.env`. Example only:
+Serializer는 raw object를 복사한 뒤 지우지 않는다. 빈 DTO에서 허용 필드를
+하나씩 작성한다.
 
-```dotenv
-API_SERVER_ENABLED=true
-API_SERVER_HOST=127.0.0.1
-API_SERVER_PORT=8643
-API_SERVER_KEY=replace-with-a-long-random-secret
+```js
+const output = {
+  publicTask: publication.publicTask,
+  state: mapCoarseState(privateRun.state),
+  progress: clampProgress(privateRun.progress),
+};
 ```
 
-Start the profile gateway, then let the bridge verify:
+다음 필드가 input 어디에 있더라도 output에는 없어야 한다.
 
-```text
-GET http://127.0.0.1:8643/v1/capabilities
-GET http://127.0.0.1:8643/health/detailed
-```
+- prompt, tool args/results, terminal output, logs, comments, transcript, memory
+- email, phone, Discord/user/channel/guild ID
+- absolute path, local endpoint/port, profile/config values
+- exact provider/model/fallback, token/cost/billing
+- internal run/session/task/approval ID와 credential-bearing URL
 
-The official API also provides `POST /v1/runs`, run status, run-event SSE,
-stop, and approval endpoints. Mini Planet's public page should remain a
-read-only observer. Any future run submission or approval UI needs separate
-authentication and must not share the public status endpoint.
+Task와 approval free text는 raw title을 자르는 방식이 아니라 별도
+`publicTitle`, `publicActionSummary`, `publicImpactSummary`, `publicRollbackSummary`가
+승인된 경우에만 출판한다. 자세한 DTO는
+[`dashboard-contract.md`](dashboard-contract.md)를 따른다.
 
-## Public snapshot contract
+## Freshness and provenance
 
-The original top-level JSON remains supported without schema changes:
-
-```json
-{
-  "rodi": {
-    "state": "작업 중",
-    "task": "주간 브리핑 통합",
-    "updatedAt": "2026-07-11T09:30:00+09:00"
-  }
-}
-```
-
-The prepared v1 envelope adds progress, run correlation, a safe current result,
-and optional recent history while remaining backward-compatible:
-
-```json
-{
-  "schemaVersion": 1,
-  "generatedAt": "2026-07-11T09:30:00+09:00",
-  "source": "hermes-bridge",
-  "agents": {
-    "rodi": {
-      "state": "작업 중",
-      "task": "주간 브리핑 통합",
-      "progress": 0.65,
-      "runId": "run_abc123",
-      "updatedAt": "2026-07-11T09:30:00+09:00",
-      "result": {
-        "kind": "report",
-        "title": "주간 브리핑 초안",
-        "summary": "검증 대기 중인 핵심 결과 4건",
-        "url": "/results/weekly-briefing.html",
-        "updatedAt": "2026-07-11T09:29:00+09:00"
-      },
-      "results": [
-        {
-          "id": "briefing_2026_w28",
-          "kind": "briefing",
-          "status": "review",
-          "title": "주간 브리핑 초안",
-          "summary": "검증 대기 중인 핵심 결과 4건",
-          "url": "/results/weekly-briefing.html",
-          "updatedAt": "2026-07-11T09:29:00+09:00"
-        }
-      ]
-    }
-  }
-}
-```
-
-The dashboard also accepts the public-safe `runtime` projection planned for
-the v2 envelope. These fields appear only when the bridge supplies them:
+모든 live snapshot/SSE event는 완전한 v2 envelope이며 다음을 포함한다.
 
 ```json
 {
   "schemaVersion": 2,
-  "agents": {
-    "yul": {
-      "state": "작업 중",
-      "task": "상태 카드 구현",
-      "runtime": {
-        "health": "healthy",
-        "model": "public-model-alias",
-        "provider": "provider-alias",
-        "riskLevel": "L2",
-        "approvalState": "not_required",
-        "blocker": "",
-        "currentTaskId": "task_dashboard_card",
-        "lastActivityAt": "2026-07-11T09:29:00+09:00"
-      }
-    }
+  "publicationMode": "live",
+  "source": "hermes-public-bridge",
+  "sourceGeneratedAt": "2026-07-29T09:12:00+09:00",
+  "bridgeObservedAt": "2026-07-29T09:12:05+09:00",
+  "expiresAt": "2026-07-29T09:15:05+09:00",
+  "isStale": false,
+  "provenance": {
+    "verificationState": "verified",
+    "evidenceDigest": "sha256:public-evidence-digest"
   },
+  "agents": {},
   "tasks": [],
   "approvals": []
 }
 ```
 
-The read-only Team Flow panel now renders sanitized task and pending-approval
-projections, with static handoff routes and safe empty states before the bridge
-is live. Knowledge and audit projections remain intentionally hidden until
-their retention and public-disclosure policies are defined. The normalized
-schemas and privacy allowlist are in [`dashboard-contract.md`](dashboard-contract.md).
-
-Contract rules:
-
-- Only keys from `config/agents.json` are accepted by the UI.
-- `state` is at most 16 characters; `task` 80; result title 80; summary 180.
-- `result` is the current singleton; `results[]` is newest-first public history,
-  capped at six cards per home. Duplicate public ids are removed.
-- `progress` is a number from `0` to `1`.
-- Result links must be relative or `https://`/`http://`; browser-unsafe schemes,
-  credentials, and public-to-private-network links are discarded.
-- Runtime fields are allowlisted and length-limited; full SOUL, memory, prompts,
-  tool arguments, terminal output, secrets, and local profile paths are forbidden.
-- Every SSE payload is a **complete snapshot**, sent either as a default
-  `message` or a named `snapshot` event.
-- On an SSE failure, the client polls `snapshotUrl` and periodically reconnects.
-
-Suggested bridge state mapping:
-
-| Hermes run state | Mini Planet `state` |
-| --- | --- |
-| queued / idle | 대기 중 |
-| started / running | 작업 중 |
-| waiting for approval / review | 검증 중 |
-| completed | 완료 |
-| failed / cancelled unexpectedly | 오류 |
+Transport, gateway, profile, agent run, task outcome, verification health는 서로 다른
+명제다. 하나의 green `healthy`로 합치지 않는다. TTL을 넘거나 freshness 필드가
+빠지면 Mini Planet은 기존 상태를 유지하지 않고 `상태 미확인`으로 강등한다.
 
 ## Runtime switch
 
-Keep the repository default in static polling mode. After the bridge is live,
-change only `config/runtime.json`:
+Bridge가 security gate를 통과하기 전에는 이 값을 유지한다.
 
 ```json
 {
-  "status": {
-    "mode": "sse",
-    "snapshotUrl": "/api/agents/snapshot",
-    "eventUrl": "/api/agents/events",
-    "pollMs": 60000,
-    "reconnectMs": 15000
-  },
-  "results": {
-    "snapshotUrl": "agent-results.json"
+  "publication": {
+    "mode": "static-demo",
+    "label": "정적 데모",
+    "notice": "Hermes 미연결 · 상태와 결과는 공개용 샘플입니다."
   }
 }
 ```
 
-Live `results[]` should normally travel inside the complete status snapshot/SSE
-payload. `results.snapshotUrl` is a reload-time curated fallback, useful for a
-static GitHub Pages deployment; it is not a second realtime channel.
+Bridge를 same-origin HTTPS로 배치하고 아래 검증을 마친 뒤에만 전환한다.
 
-Serve the site and bridge from one HTTPS origin when possible. A GitHub Pages
-site cannot safely call a private Mac-mini loopback address; use an authenticated
-public HTTPS reverse proxy/tunnel or host Mini Planet behind the Mac mini's
-reverse proxy. Keep the public endpoints read-only, rate-limited, output-sized,
-and stripped of secrets. For file snapshots, write to a temporary file and
-rename atomically.
+```json
+{
+  "publication": {
+    "mode": "live",
+    "label": "공개 상태",
+    "notice": "검증된 공개 snapshot을 표시합니다."
+  },
+  "status": {
+    "mode": "poll",
+    "snapshotUrl": "/api/agents/snapshot",
+    "eventUrl": "",
+    "pollMs": 60000,
+    "freshnessTtlMs": 180000,
+    "maxSnapshotChars": 262144
+  }
+}
+```
 
-## Deployment checklist
+초기 prototype은 poll-only와 coarse six-agent state, curated result만 사용한다.
+SSE는 auth, abuse control, reconnect, output cap이 검증된 뒤 선택적으로 켠다.
+Browser transport는 same-origin endpoint만 허용하며 SSE가 실패하면 polling으로
+돌아간다.
 
-1. Put the owner-reviewed full SOUL, project rules, and workspace settings on the Mac mini.
-2. Create one Hermes profile per key; assign unique API ports and secrets.
-3. Confirm `/v1/capabilities` before relying on runs or SSE features.
-4. Implement the bridge allowlist and v1/v2 snapshot serializers, including
-   current `result` and newest-first `results[]` public projections.
-5. Test legacy poll, v1/v2 poll, SSE reconnect, malformed payloads, and stale runs.
-6. Put the site and bridge behind HTTPS; expose no Hermes API port publicly.
-7. Switch `runtime.json`, then verify all six cards, progress, results, and homes.
+## Release gates
+
+P0, live 연결 전:
+
+1. private alias registry와 deny-by-default serializer
+2. forbidden-field negative fixtures와 malformed/future-schema fail-closed test
+3. freshness/TTL/stale/provenance test
+4. same-origin HTTPS, CORS, auth boundary, rate limit, timeout, output cap
+5. public task/result publication 및 removal policy
+6. public dashboard와 authenticated admin/approval surface 완전 분리
+
+P1, 제한된 prototype:
+
+1. six-agent coarse state와 curated result만 poll로 연결
+2. profile/gateway/transport/run/task/verification health 분리
+3. desktop/mobile와 no-WebGL fallback 검증
+4. secret/public-artifact scan과 rollback rehearsal
+
+P2, public beta:
+
+1. CSP와 third-party module supply-chain 강화
+2. Dependabot 기반 GitHub Actions SHA 갱신 검토와 release/rollback runbook
+3. abuse control 확인 후 SSE 검토
+
+## Rollback
+
+Live 상태가 잘못되면 `config/runtime.json`의 publication을 `static-demo`로 되돌리고
+snapshot/event URL을 정적 파일로 복원한다. Bridge public route를 차단하고 CDN/PWA
+cache를 purge한 뒤 incident 범위를 확인한다. Hermes profile secret rotation은
+public rollback과 분리해서 수행한다.
 
 ## Official references
 

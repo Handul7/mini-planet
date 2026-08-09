@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { auditSignatureRoster } from '../src/agent-signatures.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
@@ -38,19 +39,35 @@ function objectKeys(payload) {
     : [];
 }
 
+function walkPublicFields(value, visit, path = '') {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => walkPublicFields(item, visit, `${path}[${index}]`));
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (key.startsWith('_')) continue;
+    const childPath = path ? `${path}.${key}` : key;
+    visit(key, child, childPath);
+    walkPublicFields(child, visit, childPath);
+  }
+}
+
 const agentsConfig = json('config/agents.json');
 const servicesConfig = json('config/services.json');
 const runtimeConfig = json('config/runtime.json');
 const siteConfig = json('config/site.json');
 const statusPayload = json('agent-status.json');
 const resultPayload = json('agent-results.json');
-json('manifest.json');
+const manifestConfig = json('manifest.json');
 
 const agents = Array.isArray(agentsConfig?.agents) ? agentsConfig.agents : [];
 const agentKeys = agents.map((agent) => agent?.key).filter(Boolean);
 if (agents.length !== 6) errors.push(`config/agents.json: 에이전트가 ${agents.length}명입니다 (계약: 6명)`);
 if (!unique(agentKeys)) errors.push('config/agents.json: 중복 agent key가 있습니다');
 if (agentKeys.some((key) => !/^[a-z0-9_-]{1,32}$/i.test(key))) errors.push('config/agents.json: 사용할 수 없는 agent key가 있습니다');
+const signatureAudit = auditSignatureRoster(agents);
+for (const gap of signatureAudit.gaps) errors.push('시그니처 에셋: ' + gap);
 
 const expectedVisualStyles = new Set([
   'companion-conductor',
@@ -82,28 +99,125 @@ for (const [label, keys] of [['services', serviceKeys], ['status', statusKeys], 
 if (!['poll', 'sse'].includes(runtimeConfig?.status?.mode)) errors.push('config/runtime.json: status.mode는 poll 또는 sse여야 합니다');
 if (!runtimeConfig?.status?.snapshotUrl) errors.push('config/runtime.json: status.snapshotUrl이 필요합니다');
 if (!runtimeConfig?.results?.snapshotUrl) errors.push('config/runtime.json: results.snapshotUrl이 필요합니다');
-
-for (const field of ['publicUrl', 'homepageUrl']) {
-  if (!siteConfig?.[field]) warnings.push(`config/site.json: ${field}가 비어 있어 공개 링크가 숨겨집니다`);
+if (!['static-demo', 'live'].includes(runtimeConfig?.publication?.mode)) {
+  errors.push('config/runtime.json: publication.mode는 static-demo 또는 live여야 합니다');
 }
+if (runtimeConfig?.publication?.mode === 'static-demo' && /\blive\s+(?:dashboard|status|agent)/i.test(manifestConfig?.description || '')) {
+  errors.push('manifest.json: static-demo 배포를 live dashboard로 설명하면 안 됩니다');
+}
+if (!Number.isFinite(runtimeConfig?.status?.freshnessTtlMs) || runtimeConfig.status.freshnessTtlMs < 30000) {
+  errors.push('config/runtime.json: status.freshnessTtlMs는 30초 이상의 숫자여야 합니다');
+}
+
+const statusSchemaVersion = Number(statusPayload?.schemaVersion || 0);
+if (statusSchemaVersion > 2) errors.push(`agent-status.json: 지원하지 않는 미래 schemaVersion ${statusSchemaVersion}`);
+if (statusPayload?.agents && statusPayload.publicationMode !== runtimeConfig?.publication?.mode) {
+  errors.push('agent-status.json과 config/runtime.json의 publication mode가 다릅니다');
+}
+if (runtimeConfig?.publication?.mode === 'live') {
+  for (const field of ['sourceGeneratedAt', 'bridgeObservedAt', 'expiresAt']) {
+    if (!statusPayload?.[field] || !Number.isFinite(Date.parse(statusPayload[field]))) {
+      errors.push(`agent-status.json: live mode에는 유효한 ${field}가 필요합니다`);
+    }
+  }
+  if (typeof statusPayload?.isStale !== 'boolean') errors.push('agent-status.json: live mode에는 isStale boolean이 필요합니다');
+}
+
+if (!siteConfig?.publicUrl) warnings.push('config/site.json: publicUrl이 비어 있습니다');
 if (!siteConfig?.githubUrl) warnings.push('config/site.json: githubUrl이 비어 있습니다');
 
 const index = read('index.html');
+const boot = read('src/boot.js');
 const main = read('src/main.js');
+const style = read('src/style.css');
 const sw = read('sw.js');
+const deployWorkflow = read('.github/workflows/deploy.yml');
 const ids = [...index.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 const duplicateIds = ids.filter((id, index_) => ids.indexOf(id) !== index_);
 if (duplicateIds.length) errors.push(`index.html: 중복 id (${[...new Set(duplicateIds)].join(', ')})`);
 
+const inlineScripts = [...index.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+  .filter((match) => !/\bsrc\s*=/i.test(match[1]) && match[2].trim());
+if (inlineScripts.length) errors.push(`index.html: 실행 가능한 inline script ${inlineScripts.length}개가 있습니다`);
+const scriptPolicy = index.match(/script-src\s+([^;]+);/i)?.[1] || '';
+if (!scriptPolicy || /'unsafe-inline'/.test(scriptPolicy)) {
+  errors.push('index.html: script-src는 local external script만 허용해야 합니다');
+}
+if (/fonts\.(?:googleapis|gstatic)\.com/i.test(index) || /fonts\.(?:googleapis|gstatic)\.com/i.test(style)) {
+  errors.push('외부 Google Fonts 의존성이 남아 있습니다');
+}
+if (!main.includes("from '../vendor/three/build/three.module.min.js'")) {
+  errors.push('src/main.js: Three.js core가 로컬 고정 경로를 사용하지 않습니다');
+}
+if (/unpkg\.com/i.test(index) || /unpkg\.com/i.test(boot) || /unpkg\.com/i.test(main) || /unpkg\.com/i.test(sw)) {
+  errors.push('런타임 코드에 제거되지 않은 unpkg CDN 의존성이 있습니다');
+}
+
+const threeVendorFiles = [
+  'vendor/three/LICENSE',
+  'vendor/three/NOTICE.md',
+  'vendor/three/build/three.module.min.js',
+  'vendor/three/examples/jsm/loaders/GLTFLoader.js',
+  'vendor/three/examples/jsm/postprocessing/EffectComposer.js',
+  'vendor/three/examples/jsm/postprocessing/MaskPass.js',
+  'vendor/three/examples/jsm/postprocessing/OutputPass.js',
+  'vendor/three/examples/jsm/postprocessing/Pass.js',
+  'vendor/three/examples/jsm/postprocessing/RenderPass.js',
+  'vendor/three/examples/jsm/postprocessing/ShaderPass.js',
+  'vendor/three/examples/jsm/postprocessing/UnrealBloomPass.js',
+  'vendor/three/examples/jsm/shaders/CopyShader.js',
+  'vendor/three/examples/jsm/shaders/LuminosityHighPassShader.js',
+  'vendor/three/examples/jsm/shaders/OutputShader.js',
+  'vendor/three/examples/jsm/utils/BufferGeometryUtils.js',
+];
+const localFontFiles = [
+  'assets/fonts/NUNITO-LICENSE.txt',
+  'assets/fonts/README.md',
+  'assets/fonts/nunito-latin-600-normal.woff2',
+  'assets/fonts/nunito-latin-700-normal.woff2',
+  'assets/fonts/nunito-latin-800-normal.woff2',
+];
+for (const relative of localFontFiles) {
+  if (!existsSync(resolve(root, relative))) errors.push(`로컬 폰트 파일 없음: ${relative}`);
+  if (relative.endsWith('.woff2') && !sw.includes(`'./${relative}'`)) {
+    errors.push(`sw.js SHELL에 빠진 폰트 파일: ./${relative}`);
+  }
+  if (relative.endsWith('.woff2') && !style.includes(`../${relative}`)) {
+    errors.push(`src/style.css에 선언되지 않은 폰트 파일: ../${relative}`);
+  }
+}
+for (const relative of threeVendorFiles) {
+  if (!existsSync(resolve(root, relative))) {
+    errors.push(`Three.js vendor 파일 없음: ${relative}`);
+    continue;
+  }
+  if (relative.endsWith('.js') && !sw.includes(`'./${relative}'`)) {
+    errors.push(`sw.js SHELL에 빠진 Three.js 파일: ./${relative}`);
+  }
+}
+for (const relative of threeVendorFiles.filter((file) => file.endsWith('.js'))) {
+  const source = read(relative);
+  if (/from\s+['"]three['"]/.test(source)) errors.push(`${relative}: bare Three.js import가 남아 있습니다`);
+  for (const match of source.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+    const dependency = resolve(root, dirname(relative), match[1]);
+    if (!existsSync(dependency)) errors.push(`${relative}: vendor 의존 파일 없음 (${match[1]})`);
+  }
+}
+
+for (const match of deployWorkflow.matchAll(/uses:\s+([^\s#]+)@([^\s#]+)/g)) {
+  if (!/^[0-9a-f]{40}$/i.test(match[2])) errors.push(`deploy.yml: ${match[1]} action이 commit SHA로 고정되지 않았습니다`);
+}
+
 const indexVersion = index.match(/src\/style\.css\?v=(\d+)/)?.[1];
-const mainVersion = index.match(/'v=(\d+)'/)?.[1];
+const bootVersion = index.match(/src\/boot\.js\?v=(\d+)/)?.[1];
+const mainVersion = boot.match(/'v=(\d+)'/)?.[1];
 const cacheVersion = sw.match(/CACHE_PREFIX \+ 'v(\d+)'/)?.[1];
-if (!indexVersion || indexVersion !== mainVersion || indexVersion !== cacheVersion) {
-  errors.push(`캐시 버전 불일치: style=${indexVersion || '-'}, main=${mainVersion || '-'}, sw=${cacheVersion || '-'}`);
+if (!indexVersion || indexVersion !== bootVersion || indexVersion !== mainVersion || indexVersion !== cacheVersion) {
+  errors.push(`캐시 버전 불일치: style=${indexVersion || '-'}, boot=${bootVersion || '-'}, main=${mainVersion || '-'}, sw=${cacheVersion || '-'}`);
 }
 
 const moduleImports = [...main.matchAll(/from '\.\/(.+?\.js\?v=\d+)'/g)].map((match) => `./src/${match[1]}`);
-for (const asset of [`./src/main.js?v=${mainVersion}`, `./src/style.css?v=${indexVersion}`, ...moduleImports]) {
+for (const asset of [`./src/boot.js?v=${bootVersion}`, `./src/main.js?v=${mainVersion}`, `./src/style.css?v=${indexVersion}`, ...moduleImports]) {
   if (!sw.includes(`'${asset}'`)) errors.push(`sw.js SHELL에 빠진 버전 자산: ${asset}`);
 }
 
@@ -119,6 +233,29 @@ for (const key of agentKeys) {
   if (!ownerPattern.test(main)) errors.push(`src/main.js 기본 배치에 ${key} 소유 집이 없습니다`);
 }
 
+const modelFiles = [...main.matchAll(/file:\s*['"]([^'"]+\.gltf)['"]/g)].map((match) => match[1]);
+for (const modelFile of modelFiles) {
+  if (!modelFile.startsWith('assets/models/')) {
+    errors.push(`src/main.js: 공개 모델 경로가 assets/models 밖을 가리킵니다 (${modelFile})`);
+    continue;
+  }
+  const model = json(modelFile);
+  if (!model) continue;
+  const resources = [...(model.buffers || []), ...(model.images || [])]
+    .map((entry) => entry?.uri)
+    .filter(Boolean);
+  for (const uri of resources) {
+    if (/^data:/i.test(uri)) continue;
+    if (/^(?:https?:)?\/\//i.test(uri)) {
+      errors.push(`${modelFile}: 원격 GLTF 리소스는 허용하지 않습니다 (${uri})`);
+      continue;
+    }
+    if (!existsSync(resolve(root, dirname(modelFile), uri))) {
+      errors.push(`${modelFile}: GLTF 리소스가 없습니다 (${uri})`);
+    }
+  }
+}
+
 const publicBoundary = [
   ['config/agents.json', JSON.stringify(agentsConfig)],
   ['config/services.json', JSON.stringify(servicesConfig)],
@@ -128,20 +265,59 @@ const publicBoundary = [
   ['agent-results.json', JSON.stringify(resultPayload)],
 ];
 for (const [file, text] of publicBoundary) {
-  if (/\/Users\/|[A-Za-z]:\\\\Users\\\\/i.test(text)) errors.push(`${file}: 로컬 사용자 경로가 공개 데이터에 포함됐습니다`);
+  if (/\/Users\/|[A-Za-z]:\\\\Users\\\\|~\/|\.(?:hermes|ssh)(?:\/|\\\\)/i.test(text)) errors.push(`${file}: 로컬 사용자 경로가 공개 데이터에 포함됐습니다`);
+  if (/https?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?)(?::\d+)?/i.test(text)) errors.push(`${file}: 로컬 서비스 주소가 공개 데이터에 포함됐습니다`);
+  if (/Discord\s+#[\w-]+/i.test(text)) errors.push(`${file}: 내부 채널명이 공개 데이터에 포함됐습니다`);
   if (/bearer\s+[a-z0-9._-]+|api[_-]?server[_-]?key\s*[:=]\s*["'][^"']+/i.test(text)) errors.push(`${file}: 비밀키로 보이는 값이 포함됐습니다`);
 }
 
-for (const file of ['src/main.js', 'src/status-source.js', 'src/sky.js', 'src/ambient-audio.js', 'src/performance.js', 'src/agent-activity.js', 'src/agent-results.js']) {
+const forbiddenLiveFields = new Set([
+  'prompt', 'rawprompt', 'toolargs', 'toolarguments', 'toolresults', 'terminaloutput',
+  'memory', 'transcript', 'comments', 'apiserverkey', 'providerendpoint', 'profilepath',
+  'sessionid', 'runid', 'discorduserid', 'channelid', 'guildid', 'email', 'phone',
+  'tokenusage', 'billing', 'cost',
+]);
+for (const [file, payload] of [['agent-status.json', statusPayload], ['agent-results.json', resultPayload]]) {
+  walkPublicFields(payload, (key, _value, path) => {
+    const normalized = key.replace(/[_-]/g, '').toLowerCase();
+    if (forbiddenLiveFields.has(normalized)) errors.push(`${file}: 금지 필드 ${path}`);
+  });
+}
+
+const forbiddenProfileFields = new Set([
+  'soul', 'profilekey', 'sourcefiles', 'profilepath', 'cwd', 'environment', 'env',
+  'userid', 'discorduserid', 'channelid', 'guildid',
+]);
+walkPublicFields(agentsConfig, (key, _value, path) => {
+  const normalized = key.replace(/[_-]/g, '').toLowerCase();
+  if (forbiddenProfileFields.has(normalized)) errors.push(`config/agents.json: private profile field ${path}`);
+});
+
+for (const [key, service] of Object.entries(servicesConfig?.services || {})) {
+  if (!service?.url) continue;
+  try {
+    const url = new URL(service.url);
+    if (url.protocol !== 'https:') errors.push(`config/services.json: ${key}.url은 공개 HTTPS 주소여야 합니다`);
+    if (url.username || url.password) errors.push(`config/services.json: ${key}.url에 인증 정보가 포함됐습니다`);
+  } catch (_) {
+    errors.push(`config/services.json: ${key}.url 형식이 올바르지 않습니다`);
+  }
+}
+
+const appJsFiles = ['src/boot.js', 'src/main.js', 'src/status-source.js', 'src/public-dashboard.js', 'src/release-quality.js', 'src/sky.js', 'src/ambient-audio.js', 'src/performance.js', 'src/agent-activity.js', 'src/agent-results.js', 'src/agent-signatures.js', 'src/input-controls.js'];
+for (const file of appJsFiles) {
+  if (/from\s+['"]three(?:\/[^'"]*)?['"]/.test(read(file))) {
+    errors.push(`${file}: import map이 필요한 bare Three.js import가 남아 있습니다`);
+  }
   const checked = spawnSync(process.execPath, ['--check', resolve(root, file)], { encoding: 'utf8' });
   if (checked.status !== 0) errors.push(`${file}: JavaScript 문법 오류\n${checked.stderr.trim()}`);
 }
 
-const localServices = Object.values(servicesConfig?.services || {}).filter((service) => /https?:\/\/(localhost|127\.0\.0\.1)/i.test(service?.url || '')).length;
-if (localServices) warnings.push(`서비스 ${localServices}개가 로컬 주소를 사용합니다 (공개 화면에서는 개인 네트워크로 표시됨)`);
-
 info.push(`에이전트 ${agents.length}명 · 서비스 ${serviceKeys.length}개 · 상태 ${statusKeys.length}개 · 결과 공간 ${resultKeys.length}개`);
-info.push(`앱 캐시 v${cacheVersion || '?'} · JavaScript ${moduleImports.length + 1}개 문법 검사`);
+info.push(`번들 GLTF ${modelFiles.length}개와 Three.js ${threeVendorFiles.length - 2}개 런타임 파일 검사`);
+info.push(`로컬 Nunito WOFF2 ${localFontFiles.filter((file) => file.endsWith('.woff2')).length}개와 OFL 라이선스 검사`);
+info.push(`앱 캐시 v${cacheVersion || '?'} · JavaScript ${moduleImports.length + 2}개 문법 검사`);
+info.push(`공개 모드 ${runtimeConfig?.publication?.mode || '?'} · 상태 schema v${statusSchemaVersion || 'legacy'}`);
 
 for (const line of info) console.log(`✓ ${line}`);
 for (const line of warnings) console.warn(`⚠ ${line}`);

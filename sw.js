@@ -1,19 +1,39 @@
-// Service worker — caches the local app shell for offline / fast repeat loads.
-// Same-origin code is network-first so releases do not stick. Three.js CDN
-// modules are runtime-cached after a successful load for repeat/offline use.
+// Service worker — caches the complete local app shell for offline / fast repeat loads.
+// Same-origin code is network-first so releases do not stick.
 const CACHE_PREFIX = 'handul-planet-';
-const CACHE = CACHE_PREFIX + 'v65';
+const CACHE = CACHE_PREFIX + 'v71';
 const SHELL = [
   './',
   './index.html',
-  './src/main.js?v=65',
-  './src/status-source.js?v=65',
-  './src/sky.js?v=63',
+  './src/boot.js?v=71',
+  './src/main.js?v=71',
+  './src/status-source.js?v=70',
+  './src/public-dashboard.js?v=70',
+  './src/release-quality.js?v=70',
+  './src/sky.js?v=70',
   './src/ambient-audio.js?v=62',
   './src/performance.js?v=63',
-  './src/agent-activity.js?v=60',
+  './src/agent-activity.js?v=70',
   './src/agent-results.js?v=60',
-  './src/style.css?v=65',
+  './src/agent-signatures.js?v=71',
+  './src/input-controls.js?v=71',
+  './src/style.css?v=71',
+  './assets/fonts/nunito-latin-600-normal.woff2',
+  './assets/fonts/nunito-latin-700-normal.woff2',
+  './assets/fonts/nunito-latin-800-normal.woff2',
+  './vendor/three/build/three.module.min.js',
+  './vendor/three/examples/jsm/loaders/GLTFLoader.js',
+  './vendor/three/examples/jsm/postprocessing/EffectComposer.js',
+  './vendor/three/examples/jsm/postprocessing/MaskPass.js',
+  './vendor/three/examples/jsm/postprocessing/OutputPass.js',
+  './vendor/three/examples/jsm/postprocessing/Pass.js',
+  './vendor/three/examples/jsm/postprocessing/RenderPass.js',
+  './vendor/three/examples/jsm/postprocessing/ShaderPass.js',
+  './vendor/three/examples/jsm/postprocessing/UnrealBloomPass.js',
+  './vendor/three/examples/jsm/shaders/CopyShader.js',
+  './vendor/three/examples/jsm/shaders/LuminosityHighPassShader.js',
+  './vendor/three/examples/jsm/shaders/OutputShader.js',
+  './vendor/three/examples/jsm/utils/BufferGeometryUtils.js',
   './manifest.json',
   './config/agents.json',
   './config/services.json',
@@ -49,17 +69,6 @@ self.addEventListener('fetch', (event) => {
   // service worker that still controls the current tab.
   if (url.searchParams.has('dev')) return;
 
-  // Runtime-cache version-pinned Three.js modules. The request uses CORS and
-  // unpkg returns CORS-enabled responses, so cached modules remain executable.
-  if (url.origin === 'https://unpkg.com' && url.pathname.startsWith('/three@0.160.0/')) {
-    event.respondWith(
-      caches.match(request).then((cached) => cached || fetch(request).then((res) => {
-        if (res.ok) caches.open(CACHE).then((c) => c.put(request, res.clone())).catch(() => {});
-        return res;
-      }))
-    );
-    return;
-  }
   if (url.origin !== self.location.origin) return;
   // Public dashboard snapshots are live data — never serve them from cache.
   if (url.pathname.endsWith('agent-status.json') || url.pathname.endsWith('agent-results.json')) return;

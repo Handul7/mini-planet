@@ -1,15 +1,26 @@
-import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { createAgentStatusSource } from './status-source.js?v=65';
-import { createSkySystem } from './sky.js?v=63';
+import * as THREE from '../vendor/three/build/three.module.min.js';
+import { EffectComposer } from '../vendor/three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from '../vendor/three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from '../vendor/three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from '../vendor/three/examples/jsm/postprocessing/ShaderPass.js';
+import { OutputPass } from '../vendor/three/examples/jsm/postprocessing/OutputPass.js';
+import { GLTFLoader } from '../vendor/three/examples/jsm/loaders/GLTFLoader.js';
+import { createAgentStatusSource } from './status-source.js?v=70';
+import { createSkySystem } from './sky.js?v=70';
 import { createAmbientAudio } from './ambient-audio.js?v=62';
-import { createAgentActivityTools } from './agent-activity.js?v=60';
+import { createAgentActivityTools } from './agent-activity.js?v=70';
 import { createPerformanceGovernor } from './performance.js?v=63';
+import { signatureForAgent } from './agent-signatures.js?v=71';
+import { readGamepadControls } from './input-controls.js?v=71';
+import {
+  cleanPublicText,
+  evaluateSnapshotFreshness,
+  isPublicRecord,
+  normalizePublicAgentStatus,
+  normalizePublicDashboardView,
+  selectPublicResultProjection,
+} from './public-dashboard.js?v=70';
+import { auditLayout, summarizeFleet } from './release-quality.js?v=70';
 import {
   formatResultDate,
   mergePublicResults,
@@ -30,6 +41,8 @@ const DEV_WEATHER_PRESET = URL_PARAMS.has('dev')
 const DEV_QUALITY_OVERRIDE = URL_PARAMS.has('dev')
   ? String(URL_PARAMS.get('quality') || '').toLowerCase()
   : '';
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const IS_LOCAL_RUNTIME = LOCAL_HOSTS.has(location.hostname);
 
 // ---------------------------------------------------------------------------
 // Persistent state (localStorage) — currently just the player's avatar color.
@@ -82,6 +95,11 @@ let SITE_CONFIG = {
   publicUrl: '', homepageUrl: '', githubUrl: '',
 };
 let RUNTIME_CONFIG = {
+  publication: {
+    mode: 'static-demo',
+    label: '정적 데모',
+    notice: 'Hermes 미연결 · 상태와 결과는 공개용 샘플입니다.',
+  },
   status: { mode: 'poll', snapshotUrl: 'agent-status.json', eventUrl: '', pollMs: 60000 },
   results: { snapshotUrl: 'agent-results.json' },
 };
@@ -108,6 +126,12 @@ let RUNTIME_CONFIG = {
     console.warn('config/services.json 로드 실패 — 집은 서비스 없이 표시됩니다:', servicesResult.reason);
   }
 }
+if (IS_LOCAL_RUNTIME) {
+  try {
+    const localServices = await fetchJSON('config/services.local.json');
+    SERVICES = { ...SERVICES, ...(localServices.services || {}) };
+  } catch (_) { /* optional untracked local-only service endpoints */ }
+}
 try {
   SITE_CONFIG = { ...SITE_CONFIG, ...(await fetchJSON('config/site.json')) };
 } catch (_) { /* optional public-site metadata */ }
@@ -116,10 +140,17 @@ try {
   RUNTIME_CONFIG = {
     ...RUNTIME_CONFIG,
     ...runtimeCfg,
+    publication: { ...RUNTIME_CONFIG.publication, ...(runtimeCfg.publication || {}) },
     status: { ...RUNTIME_CONFIG.status, ...(runtimeCfg.status || {}) },
     results: { ...RUNTIME_CONFIG.results, ...(runtimeCfg.results || {}) },
   };
 } catch (_) { /* optional until the Hermes bridge is enabled */ }
+
+const introDisclosure = document.getElementById('introDisclosure');
+if (introDisclosure) {
+  const publication = RUNTIME_CONFIG.publication || {};
+  introDisclosure.textContent = [publication.label, publication.notice].filter(Boolean).join(' · ');
+}
 try {
   const resultCfg = await fetchJSON(RUNTIME_CONFIG.results.snapshotUrl || 'agent-results.json');
   const collections = resultCfg?.agents && typeof resultCfg.agents === 'object'
@@ -162,7 +193,7 @@ const THEME = {
   // agent identity colors now live in config/agents.json (per-agent `color`)
   ui: {
     accent: '#81bfbc', accentDark: '#5fa3a0', ink: '#36514f',
-    panel: 'rgba(255,255,255,0.72)', rose: '#d91f4e',
+    panel: 'rgba(255,255,255,0.94)', rose: '#d91f4e',
   },
   status: {   // agent state badge colors, matched by keyword (see statusColor)
     idle:    '#7fb98a',
@@ -202,8 +233,6 @@ const startBtn = document.getElementById('startBtn');
 const wxIconEl = document.getElementById('wxIcon');
 const wxTempEl = document.getElementById('wxTemp');
 const wxTimeEl = document.getElementById('wxTime');
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const IS_LOCAL_RUNTIME = LOCAL_HOSTS.has(location.hostname);
 
 function isUiInteractionTarget(target) {
   return target instanceof Element && !!target.closest(
@@ -236,7 +265,7 @@ function showAppNotice(message, { actionLabel = '', onAction = null, sticky = fa
   const safe = (v, fallback = '') => typeof v === 'string' && v.trim() ? v.trim() : fallback;
   const title = safe(SITE_CONFIG.title, 'Handul Mini Planet');
   const description = safe(SITE_CONFIG.metaDescription, SITE_CONFIG.description);
-  document.title = `${title} — Interactive Agent Village`;
+  document.title = `${title} — Hermes Agent Dashboard`;
   document.getElementById('introKicker').textContent = safe(SITE_CONFIG.kicker, 'A LIVING AGENT VILLAGE');
   const titleWords = title.split(/\s+/);
   const titleEl = document.getElementById('introTitle');
@@ -1088,7 +1117,166 @@ function makeGreenhouse() {
   return g;
 }
 
-function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1 } = {}) {
+function addAgentHomeSignature(root, ownerKey) {
+  if (!root || !ownerKey || root.userData.signatureKey === ownerKey) return;
+  const agent = AGENT_CONFIG.find((candidate) => candidate.key === ownerKey);
+  const spec = signatureForAgent(agent);
+  if (!spec) return;
+
+  if (root.userData.signatureRoot) {
+    root.remove(root.userData.signatureRoot);
+    disposeObject(root.userData.signatureRoot);
+  }
+
+  const color = configHex(agent?.color, 0x81bfbc);
+  const accent = toonMat(color);
+  const dark = toonMat(0x4f5c61);
+  const pale = toonMat(0xf5f2e8);
+  const glow = new THREE.MeshToonMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.44,
+    gradientMap: TOON_GRAD,
+  });
+  const signature = new THREE.Group();
+  signature.name = ownerKey + '-' + spec.id;
+  const motion = {
+    kind: spec.motion,
+    pivot: signature,
+    glowMaterial: glow,
+    active: false,
+    baseY: 0,
+    phase: Math.random() * Math.PI * 2,
+  };
+
+  if (spec.id === 'harmonic-fork') {
+    signature.position.set(-0.72, 3.58, 0.18);
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 0.72, 6), dark);
+    mast.position.y = 0.36;
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.10, 0.13), accent);
+    bridge.position.y = 0.75;
+    const forkGeometry = new THREE.CylinderGeometry(0.045, 0.045, 0.56, 6);
+    const left = new THREE.Mesh(forkGeometry, accent);
+    const right = left.clone();
+    left.position.set(-0.22, 1.00, 0);
+    right.position.set(0.22, 1.00, 0);
+    const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), glow);
+    star.position.y = 1.38;
+    [mast, bridge, left, right, star].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
+    addOutline(bridge, 1.035);
+    addOutline(star, 1.055);
+    motion.pivot = star;
+  } else if (spec.id === 'clock-crown') {
+    signature.position.set(0, 4.08, 0.30);
+    const face = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.10, 16), pale);
+    face.rotation.x = Math.PI / 2;
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.052, 6, 20), accent);
+    rim.position.z = 0.06;
+    const hour = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.22, 0.035), dark);
+    hour.position.set(-0.07, 0.08, 0.13);
+    hour.rotation.z = 0.72;
+    const minutePivot = new THREE.Group();
+    minutePivot.position.z = 0.14;
+    const minute = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.29, 0.035), glow);
+    minute.position.y = 0.13;
+    minutePivot.add(minute);
+    [face, rim, hour].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
+    signature.add(minutePivot);
+    addOutline(face, 1.025);
+    motion.pivot = minutePivot;
+  } else if (spec.id === 'signal-array') {
+    signature.position.set(-0.62, 3.58, -0.08);
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.075, 1.02, 6), dark);
+    mast.position.y = 0.51;
+    const scan = new THREE.Group();
+    scan.position.y = 1.02;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.035, 6, 20), accent);
+    const barA = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.055, 0.07), accent);
+    const barB = barA.clone();
+    barA.rotation.z = 0.55;
+    barB.rotation.z = -0.55;
+    const node = new THREE.Mesh(new THREE.IcosahedronGeometry(0.105, 1), glow);
+    [ring, barA, barB, node].forEach((mesh) => { mesh.castShadow = true; scan.add(mesh); });
+    signature.add(mast, scan);
+    addOutline(node, 1.05);
+    motion.pivot = scan;
+  } else if (spec.id === 'crescent-archive') {
+    signature.position.set(-0.48, 4.02, 0.26);
+    const crescent = new THREE.Mesh(
+      new THREE.TorusGeometry(0.31, 0.075, 6, 22, Math.PI * 1.55),
+      glow,
+    );
+    crescent.rotation.z = -0.36;
+    const bookLow = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.11, 0.32), accent);
+    const bookHigh = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.10, 0.30), pale);
+    bookLow.position.set(0.52, -0.21, -0.02);
+    bookHigh.position.set(0.48, -0.09, -0.02);
+    bookHigh.rotation.z = 0.08;
+    [crescent, bookLow, bookHigh].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
+    addOutline(crescent, 1.04);
+    motion.pivot = crescent;
+    motion.baseY = crescent.position.y;
+  } else if (spec.id === 'flower-atelier') {
+    signature.position.set(0, 3.96, 0.30);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.055, 0.62, 6), dark);
+    stem.position.y = 0.02;
+    const flower = new THREE.Group();
+    flower.position.y = 0.46;
+    const petals = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.17, 8, 6),
+      accent,
+      5,
+    );
+    const petal = new THREE.Object3D();
+    for (let index = 0; index < 5; index++) {
+      const angle = index / 5 * Math.PI * 2;
+      petal.position.set(Math.cos(angle) * 0.25, Math.sin(angle) * 0.25, 0);
+      petal.rotation.set(0, 0, angle - Math.PI / 2);
+      petal.scale.set(0.62, 1, 0.42);
+      petal.updateMatrix();
+      petals.setMatrixAt(index, petal.matrix);
+    }
+    petals.castShadow = true;
+    const centre = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 1), glow);
+    centre.position.z = 0.08;
+    centre.castShadow = true;
+    flower.add(petals, centre);
+    signature.add(stem, flower);
+    addOutline(centre, 1.05);
+    motion.pivot = flower;
+  } else if (spec.id === 'observer-ring') {
+    signature.position.set(0, 6.24, 0);
+    const orbit = new THREE.Group();
+    orbit.rotation.x = 0.58;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.035, 6, 28), accent);
+    const lenses = new THREE.InstancedMesh(
+      new THREE.IcosahedronGeometry(0.095, 1),
+      glow,
+      3,
+    );
+    const lens = new THREE.Object3D();
+    for (let index = 0; index < 3; index++) {
+      const angle = index / 3 * Math.PI * 2;
+      lens.position.set(Math.cos(angle) * 0.88, Math.sin(angle) * 0.88, 0);
+      lens.scale.setScalar(index === 0 ? 1.18 : 0.88);
+      lens.updateMatrix();
+      lenses.setMatrixAt(index, lens.matrix);
+    }
+    ring.castShadow = true;
+    lenses.castShadow = true;
+    orbit.add(ring, lenses);
+    signature.add(orbit);
+    motion.pivot = orbit;
+  }
+
+  root.add(signature);
+  root.userData.signatureKey = ownerKey;
+  root.userData.signatureSpec = spec;
+  root.userData.signatureRoot = signature;
+  root.userData.signatureMotion = motion;
+}
+
+function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '' } = {}) {
   const g = new THREE.Group();
   // Low, practical modern fishing-village house: white plaster box and a
   // simple folded metal roof instead of the old fairy-tale cone roof.
@@ -1149,6 +1337,7 @@ function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1 } = {}) {
   g.userData.homeLabelOffset = new THREE.Vector3(0, 3.95, 1.62);
   g.userData.homeFlagOffset = new THREE.Vector3(1.35, 0, 2.25);
   g.userData.doorOffset = new THREE.Vector3(0, 0, 2.15);
+  addAgentHomeSignature(g, ownerKey);
   return g;
 }
 
@@ -1269,7 +1458,7 @@ function makeTetrapod() {
   return g;
 }
 
-function makeLighthouse() {
+function makeLighthouse(ownerKey = '') {
   const g = new THREE.Group();
   const white = toonMat(0xfbfaf5);
   const red = toonMat(0xe5524b);
@@ -1340,6 +1529,95 @@ function makeLighthouse() {
   g.userData.homeLabelOffset = new THREE.Vector3(0, 6.35, 0.5);
   g.userData.homeFlagOffset = new THREE.Vector3(1.25, 0, 1.15);
   g.userData.doorOffset = new THREE.Vector3(0, 0, 1.28);
+  addAgentHomeSignature(g, ownerKey);
+  return g;
+}
+
+// The village's operational landmark. It is intentionally code-native rather
+// than a downloaded model: every node maps to a real configured agent and can
+// change color/intensity without loading another texture or draw-call-heavy
+// animation rig.
+function makeOpsBeacon() {
+  const g = new THREE.Group();
+  const graphite = toonMat(0x53656b);
+  const pale = toonMat(0xe8f0ee);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.70, 0.14, 12), graphite);
+  base.position.y = 0.07;
+  const deck = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.58, 0.09, 12), pale);
+  deck.position.y = 0.18;
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.72, 8), toonMat(0x71858a));
+  pedestal.position.y = 0.56;
+  const coreMaterial = new THREE.MeshToonMaterial({
+    color: 0x8bd8d2,
+    emissive: 0x5fa3a0,
+    emissiveIntensity: 0.72,
+    gradientMap: TOON_GRAD,
+  });
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 1), coreMaterial);
+  core.position.y = 1.03;
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0xb8efea,
+    transparent: true,
+    opacity: 0.74,
+    depthWrite: false,
+  });
+  const horizontalRing = new THREE.Mesh(new THREE.TorusGeometry(0.47, 0.025, 6, 30), ringMaterial);
+  horizontalRing.position.y = 0.82;
+  horizontalRing.rotation.x = Math.PI / 2;
+  const orbitPivot = new THREE.Group();
+  orbitPivot.position.y = 1.03;
+  const verticalRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.35, 0.018, 6, 26),
+    ringMaterial.clone(),
+  );
+  verticalRing.rotation.y = Math.PI / 2;
+  orbitPivot.add(verticalRing);
+
+  [base, deck, pedestal, core].forEach((mesh) => {
+    mesh.castShadow = true;
+    mesh.receiveShadow = mesh === base || mesh === deck;
+    addOutline(mesh, 1.025);
+    g.add(mesh);
+  });
+  g.add(horizontalRing, orbitPivot);
+
+  const fallbackColors = [0xffd76b, 0x71879e, 0x72c8c5, 0x9188bd, 0xe99591, 0x7f79bd];
+  const configured = AGENT_CONFIG.slice(0, 6);
+  const nodes = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    const agent = configured[i];
+    const color = configHex(agent?.color, fallbackColors[i]);
+    const spoke = new THREE.Mesh(
+      new THREE.BoxGeometry(0.025, 0.025, 0.40),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38 }),
+    );
+    spoke.position.set(Math.cos(angle) * 0.24, 0.82, Math.sin(angle) * 0.24);
+    spoke.rotation.y = -angle + Math.PI / 2;
+    const material = new THREE.MeshToonMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.45,
+      gradientMap: TOON_GRAD,
+    });
+    const node = new THREE.Mesh(new THREE.IcosahedronGeometry(0.075, 1), material);
+    node.position.set(Math.cos(angle) * 0.49, 0.82, Math.sin(angle) * 0.49);
+    node.castShadow = true;
+    addOutline(node, 1.04);
+    nodes.push({ key: agent?.key || `agent-${i + 1}`, color, mesh: node, material, spoke: spoke.material });
+    g.add(spoke, node);
+  }
+
+  g.userData.opsBeacon = {
+    core,
+    coreMaterial,
+    horizontalRing,
+    orbitPivot,
+    ringMaterials: [ringMaterial, verticalRing.material],
+    nodes,
+  };
+  g.userData.motionPhase = Math.random() * Math.PI * 2;
+  g.userData.colliderRadius = 0.13;
   return g;
 }
 
@@ -1489,8 +1767,18 @@ const AGENT_PLAZA_DIR = mapDir(0.02, 0.18);
 // inspector offers as swatches (limited on purpose — good results without
 // color theory), `editableParams` says which knobs the inspector shows.
 const PROP_DEFS = {
+  opsBeacon: {
+    make: () => makeOpsBeacon(),
+    lift: 0.065, collider: 0.13, baseScale: 1.25, label: 'operations-core',
+    category: '관제', paletteLabel: '✦ 운영 코어', editableParams: ['scale', 'yaw'],
+  },
   cottage: {
-    make: (o) => makeCottage({ wall: o.wall, roof: o.roof, scale: (o.scale ?? 1) * 0.75 }),
+    make: (o) => makeCottage({
+      wall: o.wall,
+      roof: o.roof,
+      scale: (o.scale ?? 1) * 0.75,
+      ownerKey: o.ownerKey,
+    }),
     lift: 0.08, collider: 0.27, baseScale: 0.75, scaleInFactory: true, label: 'cottage',
     category: '건물', paletteLabel: '🏠 집',
     editableParams: ['variant', 'scale', 'yaw'],
@@ -1563,7 +1851,7 @@ const PROP_DEFS = {
     category: '항구', paletteLabel: '🧺 어상자', editableParams: ['scale', 'yaw'] },
   tetrapod: { make: () => makeTetrapod(), lift: 0.075, collider: 0, label: 'tetrapod',
     category: '항구', paletteLabel: '🪨 테트라포드', editableParams: ['scale', 'yaw'] },
-  lighthouse: { make: () => makeLighthouse(), lift: 0.055, collider: 0.22, label: 'lighthouse',
+  lighthouse: { make: (o) => makeLighthouse(o.ownerKey), lift: 0.055, collider: 0.22, label: 'lighthouse',
     category: '건물', paletteLabel: '🔦 등대', editableParams: ['scale', 'yaw'] },
   camellia: { make: () => makeCamelliaTree(), lift: 0.035, collider: 0.08, label: 'camellia',
     category: '자연', paletteLabel: '🌺 동백나무', editableParams: ['scale', 'yaw'] },
@@ -1605,7 +1893,7 @@ const PROP_DEFS = {
     ],
   },
 };
-const PROP_CATEGORIES = ['건물', '항구', '자연', '도로변', '바닥'];
+const PROP_CATEGORIES = ['관제', '건물', '항구', '자연', '도로변', '바닥'];
 
 // ===========================================================================
 // BUNDLED MODEL PROPS — CC0 .gltf assets (assets/models/…, provenance in
@@ -2125,6 +2413,29 @@ function serializeLayout() {
   });
   return [...paths, ...props];   // paths first so they render under props
 }
+
+function currentLayoutAudit() {
+  const entries = editables.map((item) => {
+    const def = PROP_DEFS[item.data.type] || {};
+    return {
+      type: item.data.type,
+      ownerKey: item.data.ownerKey || '',
+      n: item.data.dir?.toArray?.() || null,
+      radius: (def.collider || 0) * (def.baseScale ?? 1) * (item.data.scale ?? 1),
+    };
+  });
+  return auditLayout({
+    entries,
+    expectedOwners: AGENT_CONFIG.map((agent) => agent.key),
+    requiredTypes: ['opsBeacon'],
+    planetRadius: R,
+  });
+}
+
+function notifyLayoutQuality() {
+  if (typeof onLayoutQualityChanged === 'function') onLayoutQualityChanged(currentLayoutAudit());
+}
+
 function buildLayout(layout) {
   clearProps();
   clearPaths();
@@ -2132,6 +2443,7 @@ function buildLayout(layout) {
     if (data && data.kind === 'path') spawnPath(data);
     else spawnProp(data);
   }
+  notifyLayoutQuality();
 }
 
 // --- layout persistence (localStorage + JSON import/export) ----------------
@@ -2139,7 +2451,7 @@ function buildLayout(layout) {
 // redesign starts from a clean default. Export/import remains compatible.
 const LAYOUT_KEY = 'HandulPlanet_layout_harbor_v3';
 const LAYOUT_BACKUP_KEY = 'HandulPlanet_layout_backups_v1';
-const LAYOUT_SCHEMA_VERSION = 1;
+const LAYOUT_SCHEMA_VERSION = 2;
 
 // Validate & clamp an untrusted layout (imported JSON / localStorage) into
 // entries that are guaranteed safe to spawn. Invalid entries are dropped, so
@@ -2213,7 +2525,14 @@ function loadSavedLayout() {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
     if (!raw) return null;
-    return sanitizeLayout(JSON.parse(raw));   // null if corrupt/empty → default
+    const clean = sanitizeLayout(JSON.parse(raw));
+    if (!clean) return null;
+    // Layouts created before the operations view existed keep every user
+    // placement; only the missing release-critical core is migrated in.
+    if (!clean.some((entry) => entry?.type === 'opsBeacon')) {
+      clean.push({ type: 'opsBeacon', x: 0.02, z: 0.18, yaw: 0, scale: 1 });
+    }
+    return clean;
   } catch (e) { /* corrupt -> fall back to default */ }
   return null;
 }
@@ -2264,6 +2583,7 @@ function saveLayout({ recordHistory = true, clearRedo = true } = {}) {
   lastLayoutSnap = snap;
   const stored = storeLayoutSnapshot(snap);
   notifyLayoutHistory();
+  notifyLayoutQuality();
   return stored;
 }
 
@@ -2552,6 +2872,7 @@ const HARBOR_FRONT_LAYOUT = [
   // One shared work yard is the compositional centre and the destination for
   // active front-side agents. It replaces several decorative props.
   { type: 'workPlaza', x: 0.02, z: 0.18, yaw: -0.05, rx: 0.82, rz: 0.43 },
+  { type: 'opsBeacon', x: 0.02, z: 0.18, yaw: 0.0, scale: 1.0 },
   // Three shallow landings break the old crown-shaped row into a 2 + 2 + 1
   // hillside composition. They are broad masses, not extra decoration.
   { type: 'terrace', x: -0.28, z: 0.76, yaw: -0.08, rx: 0.84, rz: 0.46 },
@@ -2559,11 +2880,11 @@ const HARBOR_FRONT_LAYOUT = [
   { type: 'terrace', x: -0.62, z: 0.24, yaw: 0.14, rx: 0.60, rz: 0.39 },
 
   // Five service homes, deliberately staggered in height, angle, and size.
-  { type: 'cottage', ownerKey: 'rodi',   x: -0.08, z: 0.84, yaw: 2.96, scale: 0.72, wall: 0xf7f5f0, roof: 0xe8896b },
-  { type: 'cottage', ownerKey: 'jarvis', x: -0.53, z: 0.62, yaw: 2.30, scale: 0.68, wall: 0xf7f5f0, roof: 0x5b7c99 },
-  { type: 'cottage', ownerKey: 'yul',    x: 0.34,  z: 0.36, yaw: -2.44, scale: 0.70, wall: 0xf7f5f0, roof: 0x5b7c99 },
-  { type: 'cottage', ownerKey: 'ludwig', x: -0.67, z: 0.18, yaw: 1.72, scale: 0.66, wall: 0xf7f5f0, roof: 0xe8896b },
-  { type: 'cottage', ownerKey: 'anne',   x: 0.66,  z: 0.04, yaw: -1.84, scale: 0.68, wall: 0xf7f5f0, roof: 0xe8896b },
+  { type: 'cottage', ownerKey: 'rodi',   x: -0.08, z: 0.84, yaw: 2.96, scale: 0.72, wall: 0xf3ecd8, roof: 0xd8af45 },
+  { type: 'cottage', ownerKey: 'jarvis', x: -0.53, z: 0.62, yaw: 2.30, scale: 0.68, wall: 0xe3eaed, roof: 0x71879e },
+  { type: 'cottage', ownerKey: 'yul',    x: 0.34,  z: 0.36, yaw: -2.44, scale: 0.70, wall: 0xdcecea, roof: 0x63b5b1 },
+  { type: 'cottage', ownerKey: 'ludwig', x: -0.67, z: 0.18, yaw: 1.72, scale: 0.66, wall: 0xe9e4ee, roof: 0x9188bd },
+  { type: 'cottage', ownerKey: 'anne',   x: 0.66,  z: 0.04, yaw: -1.84, scale: 0.68, wall: 0xf2e1df, roof: 0xe38c88 },
 
   // The harbor is one readable scene: two boats, two stalls, and a handful
   // of working props. The open water and clear lane do most of the work.
@@ -3635,7 +3956,6 @@ const AGENTS = AGENT_CONFIG.map((a) => ({
     task: a.defaultStatus?.task || '',
     updatedAt: null,
     progress: null,
-    runId: null,
     result: null,
     results: [],
     health: null,
@@ -3646,7 +3966,9 @@ const AGENTS = AGENT_CONFIG.map((a) => ({
     riskLevel: null,
     currentTaskId: null,
     lastActivityAt: null,
-    cost: null,
+    verificationState: null,
+    verifiedAt: null,
+    evidenceDigest: null,
   },
   results: RESULT_COLLECTIONS[a.key] || [],
   service: SERVICES[a.key] || null,
@@ -3654,6 +3976,7 @@ const AGENTS = AGENT_CONFIG.map((a) => ({
 const ARGOS_AGENT = AGENTS.find(a => a.key === 'argos') || null;
 let refreshRecentResultsUi = () => {};
 let resultRefreshInFlight = null;
+let opsBeaconFleetSummary = null;
 
 async function refreshPublicResults() {
   if (resultRefreshInFlight) return resultRefreshInFlight;
@@ -3710,8 +4033,55 @@ function syncAgentHomeStatusVisuals() {
       if (mat.emissive) mat.emissive.copy(tone);
       if ('emissiveIntensity' in mat) mat.emissiveIntensity = intensity;
     }
+    const signature = home.userData.signatureMotion;
+    if (signature) {
+      signature.active = statusLit;
+      signature.glowMaterial.emissiveIntensity = statusLit ? 0.86 : 0.44;
+    }
     const beam = home.userData.lighthouseBeam;
     if (beam) beam.visible = a.key === 'argos' && isWorkingStatus(a.status.state);
+  }
+  syncOpsBeaconStatusVisuals();
+}
+
+function syncOpsBeaconStatusVisuals(fleet = opsBeaconFleetSummary) {
+  const rowByKey = new Map((fleet?.rows || []).map((row) => [row.key, row]));
+  const state = fleet?.state || 'demo';
+  const coreTone = ({
+    healthy: 0x72c8c5,
+    demo: 0x81bfbc,
+    loading: 0x8ea3a5,
+    degraded: 0xe0a33f,
+    incomplete: 0xe0a33f,
+    stale: 0xc3844e,
+    error: 0xd96b6b,
+    offline: 0x7f8c90,
+  })[state] || 0x8ea3a5;
+  for (const item of editables) {
+    const beacon = item.mesh?.userData?.opsBeacon;
+    if (!beacon) continue;
+    beacon.coreMaterial.color.setHex(coreTone);
+    beacon.coreMaterial.emissive.setHex(coreTone);
+    beacon.coreMaterial.emissiveIntensity = ['healthy', 'demo'].includes(state) ? 0.78 : 0.48;
+    for (const material of beacon.ringMaterials) {
+      material.color.setHex(coreTone);
+      material.opacity = state === 'offline' ? 0.28 : 0.68;
+    }
+    for (const node of beacon.nodes) {
+      const row = rowByKey.get(node.key);
+      const agent = AGENTS.find((candidate) => candidate.key === node.key);
+      const mode = agent ? agentActivityMode(agent.status) : 'idle';
+      const linkState = row?.linkState || (fleet ? 'missing' : 'demo');
+      const dimmed = ['missing', 'stale', 'offline'].includes(linkState);
+      const failed = linkState === 'error' || mode === 'error';
+      const color = failed ? 0xd96b6b : dimmed ? 0x839093 : node.color;
+      node.material.color.setHex(color);
+      node.material.emissive.setHex(color);
+      node.material.emissiveIntensity = mode === 'working' ? 0.95 : dimmed ? 0.16 : 0.48;
+      node.mesh.scale.setScalar(dimmed ? 0.78 : mode === 'working' ? 1.12 : 1);
+      node.spoke.color.setHex(color);
+      node.spoke.opacity = dimmed ? 0.12 : mode === 'working' ? 0.66 : 0.34;
+    }
   }
 }
 
@@ -3820,6 +4190,7 @@ assignAgentHomes = function (repositionNpcs = false) {
     a.home = home;
     a.workDir = null;
     if (!home) return;
+    addAgentHomeSignature(home.mesh, a.key);
     if (a.key === 'argos') {
       // The watcher works at the lighthouse instead of commuting to the
       // front-side yard.
@@ -3893,6 +4264,21 @@ let jumpRequested = false;
 addEventListener('keydown', e => {
   const key = e.key.toLowerCase();
   const movementKey = MOVEMENT_KEYS.has(key);
+  const quickAgentIndex = Number(key) - 1;
+  const typingTarget = e.target instanceof Element
+    && e.target.matches('input, textarea, select, [contenteditable=\"true\"]');
+  if (
+    Number.isInteger(quickAgentIndex)
+    && quickAgentIndex >= 0
+    && quickAgentIndex < AGENTS.length
+    && !typingTarget
+    && !editMode
+    && !intro.isConnected
+  ) {
+    e.preventDefault();
+    dashboardOpenAgentByIndex(quickAgentIndex);
+    return;
+  }
   if (isUiInteractionTarget(e.target)) {
     if (key === 'escape') dashboardStopPatrol();
     return;
@@ -3925,9 +4311,11 @@ let dashboardCloseTeam = () => {};   // assigned by the team-overview wiring bel
 let dashboardUpdatePatrol = () => {}; // optional read-only monitoring tour
 let dashboardStopPatrol = () => {};
 let dashboardPatrolState = () => ({ enabled: false });
+let dashboardOpenAgentByIndex = () => {};
 let openServicePanel = () => {};        // assigned by the service-panel wiring below
 let closeServicePanel = () => {};       // "
 let refreshOpenServicePanel = () => {};
+let activateNearbyService = () => false;
 let updateServiceProximity = () => {};  // stepped by the main loop (집 문 앞 감지)
 
 const FOCUS_NON_OCCLUDERS = new Set(['road', 'trail', 'river', 'pond', 'sand', 'grass', 'snow']);
@@ -3998,8 +4386,8 @@ addEventListener('pointermove', e => {
 
 // ---- zoom: mouse wheel + two-finger pinch ----
 const ZOOM_MIN = 4, ZOOM_MAX = 26;
-const DASHBOARD_CAM_DIST = 19.6;
-const MOBILE_DASHBOARD_CAM_DIST = 24.5;
+const DASHBOARD_CAM_DIST = 18.8;
+const MOBILE_DASHBOARD_CAM_DIST = 23.8;
 const EXPLORE_CAM_DIST = 10.5;
 const DASHBOARD_CAM_PITCH = 0.82;
 const EXPLORE_CAM_PITCH = 0.50;
@@ -4008,6 +4396,11 @@ let experienceMode = 'dashboard';
 
 function dashboardCameraDistance() {
   return innerWidth <= 520 ? MOBILE_DASHBOARD_CAM_DIST : DASHBOARD_CAM_DIST;
+}
+
+function dashboardLookHeight() {
+  if (innerWidth <= 520) return 2.5;
+  return innerWidth / Math.max(1, innerHeight) > 1.5 ? 4.35 : 3.2;
 }
 
 function snapFollowCamera() {
@@ -4019,7 +4412,7 @@ function snapFollowCamera() {
   camera.position.copy(dashboard ? camOffset : player.position.clone().add(camOffset));
   camera.up.copy(up);
   camera.lookAt(dashboard
-    ? up.clone().multiplyScalar(1.8)
+    ? up.clone().multiplyScalar(dashboardLookHeight())
     : player.position.clone().add(up.multiplyScalar(0.8)));
 }
 
@@ -4153,6 +4546,52 @@ addEventListener('blur', () => {
   stick.addEventListener('pointerup', end);
   stick.addEventListener('pointercancel', end);
 })();
+
+document.getElementById('mobileJumpBtn')?.addEventListener('click', () => {
+  if (!editMode && experienceMode === 'explore') jumpRequested = true;
+});
+document.getElementById('mobileInteractBtn')?.addEventListener('click', () => {
+  activateNearbyService();
+});
+
+let gamepadSnapshot = readGamepadControls([]);
+let gamepadJumpHeld = false;
+let gamepadInteractHeld = false;
+function pollGamepadInput(dt) {
+  const next = readGamepadControls(
+    typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [],
+  );
+  if (!next.connected) {
+    gamepadJumpHeld = false;
+    gamepadInteractHeld = false;
+    gamepadSnapshot = next;
+    return next;
+  }
+
+  const moving = Math.abs(next.forward) > 0.01 || Math.abs(next.turn) > 0.01;
+  if (moving && !editMode && experienceMode === 'dashboard' && !intro.isConnected) {
+    setExperienceMode('explore');
+  }
+  if (next.jump && !gamepadJumpHeld && !editMode && experienceMode === 'explore') {
+    jumpRequested = true;
+  }
+  if (next.interact && !gamepadInteractHeld) activateNearbyService();
+
+  if (!editMode && experienceMode === 'explore') {
+    if (Math.abs(next.lookX) > 0.01) {
+      camDir.applyAxisAngle(playerDir.clone().normalize(), -next.lookX * dt * 1.8);
+      keepTangentAtPlayer(camDir);
+    }
+    if (Math.abs(next.lookY) > 0.01) {
+      camPitch = THREE.MathUtils.clamp(camPitch + next.lookY * dt * 1.35, 0.05, 1.2);
+    }
+  }
+
+  gamepadJumpHeld = next.jump;
+  gamepadInteractHeld = next.interact;
+  gamepadSnapshot = next;
+  return next;
+}
 
 // emoji popups use the same bloom-free DOM overlay as speech bubbles.
 const emojiBubbles = [];
@@ -4533,6 +4972,35 @@ function updateAmbientScene(t, atmosphere = {}) {
     }
     const sway = root.userData.swayGroup;
     if (sway) sway.rotation.z = Math.sin(t * (0.58 + wind * 0.45) + phase) * (0.010 + wind * 0.034);
+    const beacon = root.userData.opsBeacon;
+    if (beacon) {
+      const pulse = 1 + Math.sin(t * 1.65 + phase) * 0.055;
+      beacon.core.rotation.y = t * 0.42 + phase;
+      beacon.core.scale.setScalar(pulse);
+      beacon.orbitPivot.rotation.y = t * 0.32 + phase;
+      beacon.orbitPivot.rotation.z = Math.sin(t * 0.24 + phase) * 0.18;
+      beacon.nodes.forEach((node, index) => {
+        node.mesh.position.y = 0.82 + Math.sin(t * 1.18 + phase + index * 0.72) * 0.018;
+      });
+    }
+    const signature = root.userData.signatureMotion;
+    if (signature?.pivot) {
+      const activity = signature.active ? 1 : 0.42;
+      const signatureTime = t + signature.phase;
+      if (signature.kind === 'pulse') {
+        signature.pivot.scale.setScalar(1 + Math.sin(signatureTime * 1.9) * 0.075 * activity);
+      } else if (signature.kind === 'clock') {
+        signature.pivot.rotation.z = -signatureTime * (0.28 + activity * 0.34);
+      } else if (signature.kind === 'scan') {
+        signature.pivot.rotation.z = Math.sin(signatureTime * (0.52 + activity * 0.48)) * 0.34;
+      } else if (signature.kind === 'breathe') {
+        signature.pivot.position.y = signature.baseY + Math.sin(signatureTime * 1.1) * 0.035 * activity;
+      } else if (signature.kind === 'turn') {
+        signature.pivot.rotation.z = signatureTime * (0.08 + activity * 0.12);
+      } else if (signature.kind === 'observe') {
+        signature.pivot.rotation.y = signatureTime * (0.10 + activity * 0.24);
+      }
+    }
   }
   for (const item of editablePaths) {
     const root = item.mesh;
@@ -5037,10 +5505,26 @@ function exitEditMode() {
 // Main loop
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
+let lastDevMetricsAt = -1;
+function publishDevMetrics(elapsed) {
+  if (!URL_PARAMS.has('dev') || elapsed - lastDevMetricsAt < 0.5) return;
+  lastDevMetricsAt = elapsed;
+  document.documentElement.dataset.qaPerformance = JSON.stringify({
+    ...performanceGovernor.state(),
+    ...horizonCulling,
+  });
+  document.documentElement.dataset.qaSignatures = JSON.stringify(
+    AGENTS.map((agent) => ({
+      key: agent.key,
+      id: agent.home?.mesh?.userData?.signatureSpec?.id || null,
+    })),
+  );
+}
 function animate() {
   performanceGovernor.sample(performance.now());
   const dt = Math.min(clock.getDelta(), 0.05);
   const elapsed = clock.elapsedTime;
+  const gamepad = pollGamepadInput(dt);
 
   if (editMode) {
     // WASD/arrows pan the edit camera target ANYWHERE on the planet —
@@ -5080,6 +5564,7 @@ function animate() {
     if (!webglContextLost) {
       performanceGovernor.beforeRender(dt);
       composer.render();
+      publishDevMetrics(elapsed);
     }
     requestAnimationFrame(animate);
     return;
@@ -5094,6 +5579,8 @@ function animate() {
     if (keys['d'] || keys['arrowright']) turn -= 1;
     fwd  += -stickVec.y;
     turn += -stickVec.x;
+    fwd  += gamepad.forward;
+    turn += gamepad.turn;
   }
   const moveMag = Math.min(1, Math.abs(fwd));
 
@@ -5179,21 +5666,28 @@ function animate() {
     if (!focusSide) {
       focusSide = chooseAgentFocusSide(focusNpc);
     }
+    const focusHome = focusNpc.userData.agent?.home;
+    const lighthouseFocus = focusHome?.data?.type === 'lighthouse';
     const toCam = focusSide.clone();
     toCam.sub(nUp.clone().multiplyScalar(toCam.dot(nUp)));     // keep tangent to surface
     if (toCam.lengthSq() < 1e-4) toCam.copy(tangentBasis(nUp).north);
     toCam.normalize();
+    const focusDistance = lighthouseFocus
+      ? (innerWidth <= 520 ? 7.2 : 6.6)
+      : (innerWidth <= 520 ? 6.2 : 5.5);
+    const focusElevation = lighthouseFocus
+      ? (innerWidth <= 520 ? 5.2 : 4.8)
+      : (innerWidth <= 520 ? 4.15 : 3.8);
     const focusTarget = aPos.clone()
-      .add(toCam.multiplyScalar(innerWidth <= 520 ? 7.0 : 6.4))
-      .add(nUp.clone().multiplyScalar(innerWidth <= 520 ? 3.35 : 3.05));
-    _focusLookTarget.copy(aPos).add(nUp.clone().multiplyScalar(0.82));
-    const focusHome = focusNpc.userData.agent?.home;
+      .add(toCam.multiplyScalar(focusDistance))
+      .add(nUp.clone().multiplyScalar(focusElevation));
+    _focusLookTarget.copy(aPos).add(nUp.clone().multiplyScalar(lighthouseFocus ? 1.34 : 0.94));
     if (focusHome?.mesh) {
       focusHome.mesh.getWorldPosition(_focusHomePosition);
       _focusHomePosition.add(focusHome.dir.clone().multiplyScalar(
-        focusHome.data.type === 'lighthouse' ? 1.8 : 1.18
+        lighthouseFocus ? 3.4 : 1.18
       ));
-      _focusLookTarget.lerp(_focusHomePosition, focusHome.data.type === 'lighthouse' ? 0.30 : 0.24);
+      _focusLookTarget.lerp(_focusHomePosition, lighthouseFocus ? 0.42 : 0.24);
     }
     camera.position.lerp(focusTarget, 1 - Math.pow(0.02, dt));
     camera.up.copy(nUp);
@@ -5217,7 +5711,7 @@ function animate() {
     camera.position.lerp(camTarget, 1 - Math.pow(0.001, dt));
     camera.up.copy(up);
     camera.lookAt(dashboard
-      ? up.clone().multiplyScalar(1.8)
+      ? up.clone().multiplyScalar(dashboardLookHeight())
       : player.position.clone().add(up.clone().multiplyScalar(0.8)));
   }
 
@@ -5250,6 +5744,7 @@ function animate() {
   if (!webglContextLost) {
     performanceGovernor.beforeRender(dt);
     composer.render();
+    publishDevMetrics(elapsed);
   }
   requestAnimationFrame(animate);
 }
@@ -5337,6 +5832,10 @@ addEventListener('keydown', anyKeyStart);
   const undoBtn     = document.getElementById('editUndoBtn');
   const redoBtn     = document.getElementById('editRedoBtn');
   const saveStateEl = document.getElementById('editorSaveState');
+  const qualityEl   = document.getElementById('editorQuality');
+  const auditEl     = document.getElementById('layoutAudit');
+  const auditScoreEl = document.getElementById('layoutAuditScore');
+  const auditSummaryEl = document.getElementById('layoutAuditSummary');
   const exportBtn   = document.getElementById('editExportBtn');
   const importBtn   = document.getElementById('editImportBtn');
   const restoreBtn  = document.getElementById('editRestoreBtn');
@@ -5523,6 +6022,25 @@ addEventListener('keydown', anyKeyStart);
     saveStateEl.classList.toggle('saved', !!ok);
     saveStateEl.classList.toggle('error', !ok);
   };
+  window.onLayoutQualityChanged = (audit) => {
+    if (!audit) return;
+    const label = audit.status === 'ready'
+      ? `배치 ${audit.score}`
+      : audit.status === 'review' ? `배치 검토 ${audit.score}` : `배치 차단 ${audit.score}`;
+    const details = [...audit.errors, ...audit.warnings];
+    if (qualityEl) {
+      qualityEl.className = `editor-quality ${audit.status}`;
+      qualityEl.textContent = label;
+      qualityEl.title = details.join(' · ') || '필수 집, 운영 코어, 이동 충돌 점검 통과';
+    }
+    if (auditEl) auditEl.dataset.state = audit.status;
+    if (auditScoreEl) auditScoreEl.textContent = String(audit.score);
+    if (auditSummaryEl) {
+      auditSummaryEl.textContent = details[0]
+        || `필수 배치 통과 · 오브젝트 ${audit.objectCount}개 · 이동 충돌 없음`;
+      auditSummaryEl.title = details.join('\n');
+    }
+  };
   window.onLayoutHistoryChanged = ({ canUndo, canRedo }) => {
     if (undoBtn) undoBtn.disabled = !canUndo;
     if (redoBtn) redoBtn.disabled = !canRedo;
@@ -5530,6 +6048,7 @@ addEventListener('keydown', anyKeyStart);
   window.onLayoutImported = (ok, err) => {
     flashHint(ok ? '레이아웃을 불러왔습니다 ✓' : `불러오기 실패: ${err || '형식 오류'}`);
   };
+  notifyLayoutQuality();
   // path drawing UI state
   const drawBar = document.getElementById('drawBar');
   window.onDrawModeChanged = (type) => {
@@ -5664,11 +6183,23 @@ addEventListener('keydown', anyKeyStart);
   const recentResultsBtn = document.getElementById('recentResultsBtn');
   const recentResultsState = document.getElementById('recentResultsState');
   const recentResultsBadge = document.getElementById('recentResultsBadge');
+  const opsFleetEl = document.getElementById('opsFleet');
+  const opsActiveEl = document.getElementById('opsActive');
+  const opsApprovalEl = document.getElementById('opsApproval');
+  const opsPipelineEl = document.getElementById('opsPipeline');
+  const opsLinkEl = document.getElementById('opsLink');
+  const opsLinkDetailEl = document.getElementById('opsLinkDetail');
   const agentByKey = new Map(AGENTS.map((agent) => [agent.key, agent]));
   const chips = {};
   let dashboardView = {
     schemaVersion: 0,
+    publicationMode: RUNTIME_CONFIG.publication?.mode || 'static-demo',
     generatedAt: null,
+    sourceGeneratedAt: null,
+    bridgeObservedAt: null,
+    expiresAt: null,
+    isStale: false,
+    freshness: { state: 'static', isStale: false, reason: 'static-demo' },
     source: 'legacy',
     teamHealth: null,
     tasks: [],
@@ -5686,7 +6217,9 @@ addEventListener('keydown', anyKeyStart);
   let statusSource = null;
   let lastStatusReceivedAt = null;
   let lastStatusGeneratedAt = null;
+  let lastRecoveryAttemptAt = 0;
   let connectionState = 'loading';
+  let reportedAgentKeys = new Set();
   const RESULT_SEEN_KEY = 'HandulPlanet_seen_results_v1';
   let seenResults = new Set();
   try {
@@ -5744,8 +6277,21 @@ addEventListener('keydown', anyKeyStart);
     barWrap?.classList.toggle('collapsed', collapsed);
     barToggle?.setAttribute('aria-expanded', String(!collapsed));
   }
-  barToggle?.addEventListener('click', () => setBarCollapsed(!barWrap.classList.contains('collapsed')));
-  if (matchMedia('(max-width: 520px)').matches) setBarCollapsed(true);
+  const agentBarBreakpoint = matchMedia('(max-width: 520px)');
+  let barCollapseTouched = false;
+  barToggle?.addEventListener('click', () => {
+    barCollapseTouched = true;
+    setBarCollapsed(!barWrap.classList.contains('collapsed'));
+  });
+  const syncAgentBarBreakpoint = () => {
+    // A user choice lasts within the current breakpoint. Crossing between
+    // mobile and desktop restores the ergonomic default instead of leaving a
+    // rotated phone's collapsed state stuck on a large monitor.
+    barCollapseTouched = false;
+    setBarCollapsed(agentBarBreakpoint.matches);
+  };
+  agentBarBreakpoint.addEventListener?.('change', syncAgentBarBreakpoint);
+  if (!barCollapseTouched) setBarCollapsed(agentBarBreakpoint.matches);
 
   // '3분 전' style relative time for status.updatedAt (null → '')
   function timeAgo(iso) {
@@ -5759,15 +6305,106 @@ addEventListener('keydown', anyKeyStart);
     return `${Math.round(min / 60 / 24)}일 전 갱신`;
   }
 
+  function setUnknownPublicStatus(agent, task = '공개 상태의 유효기간이 지났습니다.') {
+    Object.assign(agent.status, {
+      state: '상태 미확인',
+      task,
+      updatedAt: null,
+      progress: null,
+      result: null,
+      results: [],
+      health: 'unknown',
+      model: null,
+      provider: null,
+      blocker: null,
+      approvalState: null,
+      riskLevel: null,
+      currentTaskId: null,
+      lastActivityAt: null,
+      verificationState: 'unverified',
+      verifiedAt: null,
+      evidenceDigest: null,
+    });
+  }
+
+  // Live mode starts closed: curated defaults must never be mistaken for a
+  // Hermes observation when the first bridge request is slow or unavailable.
+  if (dashboardView.publicationMode === 'live') {
+    for (const agent of AGENTS) setUnknownPublicStatus(agent, '첫 공개 상태를 확인하는 중입니다.');
+  }
+
+  function expireLiveDashboard(reason) {
+    if (dashboardView.publicationMode !== 'live' || dashboardView.isStale) return;
+    dashboardView = {
+      ...dashboardView,
+      isStale: true,
+      teamHealth: 'unknown',
+      tasks: [],
+      approvals: [],
+      freshness: { ...dashboardView.freshness, state: 'stale', isStale: true, reason },
+    };
+    for (const agent of AGENTS) setUnknownPublicStatus(agent);
+    refreshBar();
+    renderTeamOverview();
+    syncAgentHomeStatusVisuals();
+    refreshOpenServicePanel();
+    refreshRecentResultsUi();
+    renderConnectionBadge();
+  }
+
   function renderStatusFreshness() {
     if (!freshnessEl) return;
+    const now = Date.now();
     const checked = lastStatusReceivedAt ? timeAgo(lastStatusReceivedAt).replace(' 갱신', '') : '';
     const sourceAge = lastStatusGeneratedAt ? timeAgo(lastStatusGeneratedAt).replace(' 갱신', '') : '';
-    const stale = lastStatusReceivedAt && Date.now() - Date.parse(lastStatusReceivedAt) > Math.max(120000, (RUNTIME_CONFIG.status.pollMs || 60000) * 2.5);
+    const transportStale = lastStatusReceivedAt
+      && now - Date.parse(lastStatusReceivedAt) > Math.max(120000, (RUNTIME_CONFIG.status.pollMs || 60000) * 2.5);
+    if (dashboardView.publicationMode === 'live' && !dashboardView.isStale) {
+      const freshness = evaluateSnapshotFreshness({
+        publicationMode: dashboardView.publicationMode,
+        sourceGeneratedAt: dashboardView.sourceGeneratedAt,
+        bridgeObservedAt: dashboardView.bridgeObservedAt,
+        expiresAt: dashboardView.expiresAt,
+        isStale: false,
+      }, {
+        now,
+        ttlMs: RUNTIME_CONFIG.status.freshnessTtlMs || 180000,
+        maxFutureSkewMs: RUNTIME_CONFIG.status.maxFutureSkewMs || 300000,
+      });
+      if (freshness.isStale) expireLiveDashboard(freshness.reason);
+    }
+    if (transportStale) expireLiveDashboard('transport-timeout');
+    const recoveryInterval = Math.max(30000, Math.min(60000, RUNTIME_CONFIG.status.pollMs || 60000));
+    if (dashboardView.publicationMode === 'live' && dashboardView.isStale
+      && statusSource && now - lastRecoveryAttemptAt >= recoveryInterval) {
+      lastRecoveryAttemptAt = now;
+      statusSource.refresh();
+    }
+    const stale = dashboardView.isStale || transportStale;
     freshnessEl.classList.toggle('stale', !!stale || connectionState === 'offline');
-    if (connectionState === 'offline') freshnessEl.textContent = checked ? `연결 끊김 · 마지막 확인 ${checked}` : '상태 연결을 확인해주세요';
+    if (dashboardView.publicationMode === 'static-demo') {
+      freshnessEl.classList.remove('stale');
+      freshnessEl.textContent = RUNTIME_CONFIG.publication?.notice || 'Hermes 미연결 · 공개용 샘플 데이터';
+    } else if (dashboardView.isStale) {
+      freshnessEl.textContent = sourceAge ? `상태 만료 · 데이터 ${sourceAge}` : '상태 만료 · 공개 상태를 확인해주세요';
+    } else if (connectionState === 'offline') freshnessEl.textContent = checked ? `연결 끊김 · 마지막 확인 ${checked}` : '상태 연결을 확인해주세요';
     else if (!checked) freshnessEl.textContent = '첫 상태를 확인하는 중';
     else freshnessEl.textContent = sourceAge ? `확인 ${checked} · 데이터 ${sourceAge}` : `마지막 확인 ${checked} · 항목 시각 미제공`;
+  }
+
+  function renderConnectionBadge() {
+    if (!connectionEl) return;
+    let state = connectionState;
+    let label = ({ live: '실시간', polling: '주기 확인', loading: '연결 중', offline: '오프라인' })[state] || state;
+    if (dashboardView.publicationMode === 'static-demo') {
+      state = 'static';
+      label = RUNTIME_CONFIG.publication?.label || '정적 데모';
+    } else if (dashboardView.isStale) {
+      state = 'stale';
+      label = '상태 만료';
+    }
+    connectionEl.className = `status-connection ${state}`;
+    connectionEl.textContent = label;
   }
 
   function resultFingerprint(agent, result) {
@@ -5842,6 +6479,14 @@ addEventListener('keydown', anyKeyStart);
       degraded: '주의',
       error: '오류',
       offline: '오프라인',
+      unknown: '미확인',
+    };
+    const verificationLabels = {
+      unverified: '미검증',
+      pending: '검증 대기',
+      verified: '검증됨',
+      failed: '검증 실패',
+      not_applicable: '',
     };
     const approvalLabels = {
       not_required: '',
@@ -5852,7 +6497,7 @@ addEventListener('keydown', anyKeyStart);
     const healthEl = el('agentHealth');
     const modelEl = el('agentModel');
     const riskEl = el('agentRisk');
-    const costEl = el('agentCost');
+    const verificationEl = el('agentVerification');
     const healthLabel = healthLabels[status.health] || '';
     const modelLabel = [status.provider, status.model].filter(Boolean).join(' · ');
     const approvalLabel = approvalLabels[status.approvalState] || '';
@@ -5862,13 +6507,12 @@ addEventListener('keydown', anyKeyStart);
     healthEl.className = status.health ? 'health-' + status.health : '';
     modelEl.textContent = modelLabel;
     riskEl.textContent = riskLabel;
-    costEl.textContent = status.cost
-      ? status.cost.amount.toLocaleString(undefined, { maximumFractionDigits: 4 }) + (status.cost.currency ? ' ' + status.cost.currency : '')
-      : '';
-    for (const item of [healthEl, modelEl, riskEl, costEl]) item.hidden = !item.textContent;
+    verificationEl.textContent = verificationLabels[status.verificationState] || '';
+    verificationEl.title = status.verifiedAt || status.evidenceDigest || '';
+    for (const item of [healthEl, modelEl, riskEl, verificationEl]) item.hidden = !item.textContent;
 
     const runtimeEl = el('agentRuntime');
-    runtimeEl.hidden = ![healthEl, modelEl, riskEl, costEl].some((item) => !item.hidden);
+    runtimeEl.hidden = ![healthEl, modelEl, riskEl, verificationEl].some((item) => !item.hidden);
 
     const alertEl = el('agentAlert');
     const waitingApproval = status.approvalState === 'pending';
@@ -5893,7 +6537,7 @@ addEventListener('keydown', anyKeyStart);
     nameEl.appendChild(small);
     el('agentFantasy').textContent = (a.emoji || '✦') + ' ' + (a.fantasy || '');
     el('agentRole').textContent = a.operationalRole || a.role || '';
-    el('agentSoul').textContent = a.identitySummary || a.soul || '';
+    el('agentSoul').textContent = a.identitySummary || '';
     el('agentTagline').textContent = a.tagline ? '“' + a.tagline + '”' : '';
     el('agentChannel').textContent = a.channel || '';
     el('agentChannel').hidden = !a.channel;
@@ -5973,6 +6617,14 @@ addEventListener('keydown', anyKeyStart);
     if (restoreFocus && wasOpen) agentCardOpener?.isConnected && agentCardOpener.focus();
     agentCardOpener = null;
   }
+  dashboardOpenAgentByIndex = (index) => {
+    const agent = AGENTS[index];
+    if (!agent) return;
+    dashboardStopPatrol();
+    closeServicePanel();
+    setExperienceMode('dashboard');
+    openAgentCard(agent);
+  };
 
   function patrolRank(agent) {
     return {
@@ -6120,92 +6772,8 @@ addEventListener('keydown', anyKeyStart);
     }
   });
 
-  const clean = (v, max) => (typeof v === 'string' && v.trim()) ? v.trim().slice(0, max) : null;
-  const isRecord = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
-  const normalizeEnum = (value, allowed) => {
-    const normalized = clean(value, 32)?.toLowerCase() || null;
-    return normalized && allowed.includes(normalized) ? normalized : null;
-  };
-  const normalizeCost = (value) => {
-    const record = Number.isFinite(value) ? { amount: value } : value;
-    if (!isRecord(record) || !Number.isFinite(record.amount)) return null;
-    const amount = THREE.MathUtils.clamp(record.amount, 0, 1000000);
-    return { amount, currency: clean(record.currency, 8)?.toUpperCase() || '' };
-  };
-  const normalizeRiskLevel = (value) => {
-    const risk = clean(value, 2)?.toUpperCase() || null;
-    return ['L1', 'L2', 'L3', 'L4'].includes(risk) ? risk : null;
-  };
-  const normalizeAgentKey = (value) => {
-    const key = clean(value, 40);
-    return key && agentByKey.has(key) ? key : null;
-  };
-  const normalizeIdList = (value) => Array.isArray(value)
-    ? value.map((item) => clean(item, 120)).filter(Boolean).slice(0, 20)
-    : [];
-  const normalizeTask = (value) => {
-    if (!isRecord(value)) return null;
-    const title = clean(value.title, 100);
-    if (!title) return null;
-    const allowedStatuses = [
-      'queued', 'running', 'blocked', 'waiting_approval',
-      'verifying', 'completed', 'failed', 'cancelled',
-    ];
-    const status = normalizeEnum(value.status, allowedStatuses) || 'queued';
-    return {
-      id: clean(value.id, 120) || '',
-      title,
-      ownerAgent: normalizeAgentKey(value.ownerAgent ?? value.owner_agent),
-      requester: normalizeAgentKey(value.requester),
-      status,
-      parentIds: normalizeIdList(value.parentIds ?? value.parents),
-      dependencyIds: normalizeIdList(value.dependencyIds ?? value.dependencies),
-      riskLevel: normalizeRiskLevel(value.riskLevel ?? value.risk_level),
-      approvalState: normalizeEnum(
-        value.approvalState ?? value.approval_state,
-        ['not_required', 'pending', 'approved', 'rejected'],
-      ),
-      verifier: normalizeAgentKey(value.verifier),
-      progress: Number.isFinite(value.progress)
-        ? THREE.MathUtils.clamp(value.progress, 0, 1)
-        : null,
-      updatedAt: clean(value.updatedAt ?? value.updated_at, 40),
-    };
-  };
-  const normalizeApproval = (value) => {
-    if (!isRecord(value)) return null;
-    const actionSummary = clean(value.actionSummary ?? value.action_summary, 140);
-    if (!actionSummary) return null;
-    return {
-      id: clean(value.id, 120) || '',
-      taskId: clean(value.taskId ?? value.task_id, 120),
-      requestedBy: normalizeAgentKey(value.requestedBy ?? value.requested_by),
-      riskLevel: normalizeRiskLevel(value.riskLevel ?? value.risk_level) || 'L4',
-      status: normalizeEnum(value.status, ['pending', 'approved', 'rejected', 'cancelled']) || 'pending',
-      actionSummary,
-      impactSummary: clean(value.impactSummary ?? value.impact_summary, 180),
-      rollbackSummary: clean(value.rollbackSummary ?? value.rollback_summary, 180),
-      requestedAt: clean(value.requestedAt ?? value.requested_at, 40),
-    };
-  };
-  function normalizeDashboardView(meta) {
-    const team = isRecord(meta.team) ? meta.team : {};
-    const runtime = isRecord(meta.runtime) ? meta.runtime : {};
-    const schemaVersion = Number.isInteger(meta.schemaVersion) ? meta.schemaVersion : 0;
-    return {
-      schemaVersion,
-      generatedAt: clean(meta.generatedAt, 40),
-      source: clean(meta.source, 40) || (schemaVersion > 0 ? 'bridge' : 'legacy'),
-      teamHealth: normalizeEnum(
-        team.health ?? runtime.health,
-        ['healthy', 'degraded', 'error', 'offline'],
-      ),
-      tasks: (Array.isArray(meta.tasks) ? meta.tasks : [])
-        .map(normalizeTask).filter(Boolean).slice(0, 24),
-      approvals: (Array.isArray(meta.approvals) ? meta.approvals : [])
-        .map(normalizeApproval).filter(Boolean).slice(0, 16),
-    };
-  }
+  const clean = cleanPublicText;
+  const isRecord = isPublicRecord;
 
   const makeTeamElement = (tag, className = '', text = '') => {
     const node = document.createElement(tag);
@@ -6223,7 +6791,7 @@ addEventListener('keydown', anyKeyStart);
     failed: '오류',
     cancelled: '취소',
   };
-  const isQuietAgent = (agent) => /대기|휴식|오프라인/.test(agent.status.state || '');
+  const isQuietAgent = (agent) => /대기|휴식|오프라인|상태 미확인/.test(agent.status.state || '');
   function agentTaskStatus(agent) {
     if (agent.status.approvalState === 'pending') return 'waiting_approval';
     if (agent.status.blocker) return 'blocked';
@@ -6234,6 +6802,7 @@ addEventListener('keydown', anyKeyStart);
     return 'queued';
   }
   function currentTasks() {
+    if (dashboardView.publicationMode === 'live' && (!lastStatusReceivedAt || dashboardView.isStale)) return [];
     if (dashboardView.tasks.length) return dashboardView.tasks;
     return AGENTS.filter((agent) => !isQuietAgent(agent)).map((agent) => ({
       id: agent.status.currentTaskId || '',
@@ -6272,6 +6841,76 @@ addEventListener('keydown', anyKeyStart);
       });
     }
     return items.slice(0, 12);
+  }
+  function currentFleetSummary(approvalCount = pendingApprovals().length) {
+    return summarizeFleet({
+      agents: AGENTS.map((agent) => ({
+        key: agent.key,
+        name: agent.name,
+        kor: agent.kor,
+        role: agent.role,
+        color: agent.color,
+        state: agent.status.state,
+        task: agent.status.task,
+        health: agent.status.health,
+        updatedAt: agent.status.updatedAt,
+      })),
+      reportedAgentKeys: [...reportedAgentKeys],
+      publicationMode: dashboardView.publicationMode,
+      connectionState,
+      isStale: dashboardView.isStale,
+      approvalCount,
+    });
+  }
+  function renderOperationalSummary(fleet = currentFleetSummary()) {
+    if (opsFleetEl) opsFleetEl.textContent = fleet.coverageLabel;
+    if (opsActiveEl) opsActiveEl.textContent = String(fleet.active);
+    if (opsApprovalEl) opsApprovalEl.textContent = String(fleet.approvalCount);
+    if (opsPipelineEl) opsPipelineEl.textContent = fleet.stateLabel;
+    if (opsLinkEl) opsLinkEl.dataset.state = fleet.state;
+    if (opsLinkDetailEl) {
+      opsLinkDetailEl.textContent = dashboardView.publicationMode === 'static-demo'
+        ? 'sample'
+        : ({ live: 'stream', polling: 'poll', loading: 'bridge', offline: 'retry' })[connectionState] || 'bridge';
+    }
+    opsBeaconFleetSummary = fleet;
+    syncOpsBeaconStatusVisuals(fleet);
+  }
+  function renderTeamNetwork(fleet) {
+    const container = el('teamNetwork');
+    if (!container) return;
+    container.replaceChildren();
+    const summary = el('teamNetworkSummary');
+    if (summary) {
+      summary.textContent = dashboardView.publicationMode === 'static-demo'
+        ? `${fleet.expected}명 샘플`
+        : `${fleet.linked} / ${fleet.expected} 연결`;
+    }
+    const linkLabels = {
+      demo: '샘플', online: '연결', degraded: '확인', missing: '누락',
+      stale: '만료', offline: '중단', error: '오류', ready: '준비',
+    };
+    for (const row of fleet.rows) {
+      const article = makeTeamElement('article', `team-network-agent state-${row.linkState}`);
+      article.dataset.agent = row.key;
+      const identity = makeTeamElement('div', 'team-network-identity');
+      const dot = makeTeamElement('i');
+      dot.style.background = Number.isFinite(row.color) ? cssHex(row.color) : '#8ea3a5';
+      const nameWrap = makeTeamElement('span');
+      nameWrap.append(
+        makeTeamElement('strong', '', row.kor || row.name),
+        makeTeamElement('small', '', clean(row.role, 52) || row.key),
+      );
+      identity.append(dot, nameWrap);
+      const activity = makeTeamElement('div', 'team-network-activity');
+      activity.append(
+        makeTeamElement('strong', '', clean(row.state, 32) || '상태 미확인'),
+        makeTeamElement('small', '', clean(row.task, 80) || (row.updatedAt ? timeAgo(row.updatedAt) : '공개 작업 정보 없음')),
+      );
+      const link = makeTeamElement('span', `team-network-link state-${row.linkState}`, linkLabels[row.linkState] || '확인');
+      article.append(identity, activity, link);
+      container.appendChild(article);
+    }
   }
   function renderTeamEmpty(container, icon, title, copy) {
     const empty = makeTeamElement('div', 'team-empty');
@@ -6317,7 +6956,10 @@ addEventListener('keydown', anyKeyStart);
     container.replaceChildren();
     el('teamTaskCount').textContent = tasks.length + (tasks.length === 1 ? ' task' : ' tasks');
     if (!tasks.length) {
-      renderTeamEmpty(container, '☕', '실행 중인 작업 없음', 'Hermes가 작업을 시작하면 이곳에 흐름이 나타납니다.');
+      const copy = dashboardView.publicationMode === 'static-demo'
+        ? 'Hermes 연결 후 공개 승인된 작업만 이곳에 표시됩니다.'
+        : '공개 승인된 작업이 생기면 이곳에 흐름이 나타납니다.';
+      renderTeamEmpty(container, '☕', '공개된 작업 없음', copy);
       return;
     }
     for (const task of tasks.slice(0, 8)) {
@@ -6380,12 +7022,15 @@ addEventListener('keydown', anyKeyStart);
     if (health.includes('error')) return 'error';
     if (health.includes('degraded')) return 'degraded';
     if (health.every((value) => value === 'offline')) return 'offline';
+    if (health.includes('unknown')) return 'unknown';
+    if (health.includes('offline')) return 'degraded';
     return 'healthy';
   }
   function renderTeamOverview() {
     if (!teamPanelEl) return;
     const tasks = currentTasks();
     const approvals = pendingApprovals();
+    const fleet = currentFleetSummary(approvals.length);
     const activeTaskStates = new Set(['running', 'blocked', 'waiting_approval', 'verifying']);
     const taskOwners = new Set(
       tasks.filter((task) => activeTaskStates.has(task.status) && task.ownerAgent)
@@ -6394,26 +7039,39 @@ addEventListener('keydown', anyKeyStart);
     const activeAgents = AGENTS.filter((agent) =>
       !isQuietAgent(agent) && agentTaskStatus(agent) !== 'completed'
     ).length;
-    const activeCount = Math.max(activeAgents, taskOwners.size);
+    const activeCount = Math.max(activeAgents, taskOwners.size, fleet.active);
     const health = resolvedTeamHealth();
-    const healthLabel = {
+    const fleetHealth = ({
+      healthy: health,
+      loading: 'unknown',
+      degraded: 'degraded',
+      incomplete: 'degraded',
+      stale: 'degraded',
+      error: 'error',
+      offline: 'offline',
+    })[fleet.state] || health;
+    const healthLabel = dashboardView.publicationMode === 'static-demo' ? '미연결' : ({
       healthy: '정상',
       degraded: '주의',
       error: '오류',
       offline: '중단',
-    }[health] || '준비';
+      unknown: '미확인',
+    }[fleetHealth] || '미확인');
 
-    el('teamPanelSummary').textContent = TEAM_CONFIG.systemSummary || '역할이 분리된 에이전트 팀의 현재 흐름입니다.';
-    const source = dashboardView.schemaVersion > 0
-      ? 'v' + dashboardView.schemaVersion + ' · ' + (dashboardView.source || 'bridge')
-      : '정적 상태';
+    const teamSummary = TEAM_CONFIG.systemSummary || '역할이 분리된 에이전트 팀의 현재 흐름입니다.';
+    el('teamPanelSummary').textContent = dashboardView.publicationMode === 'static-demo'
+      ? `${teamSummary} 현재 표시는 공개용 정적 샘플입니다.`
+      : teamSummary;
+    const source = dashboardView.publicationMode === 'static-demo'
+      ? (RUNTIME_CONFIG.publication?.label || '정적 데모')
+      : `v${dashboardView.schemaVersion || '?'} · ${dashboardView.source || 'bridge'}`;
     el('teamPanelSource').textContent = source;
-    el('teamPanelSource').title = dashboardView.generatedAt || 'Hermes bridge 연결 전';
+    el('teamPanelSource').title = dashboardView.sourceGeneratedAt || 'Hermes bridge 연결 전';
     el('teamMetricAgents').textContent = String(AGENTS.length);
     el('teamMetricActive').textContent = String(activeCount);
     el('teamMetricApprovals').textContent = String(approvals.length);
     el('teamMetricHealth').textContent = healthLabel;
-    el('teamMetricHealth').dataset.health = health || 'ready';
+    el('teamMetricHealth').dataset.health = fleetHealth || 'ready';
 
     if (teamApprovalBadge) {
       teamApprovalBadge.hidden = approvals.length === 0;
@@ -6424,6 +7082,8 @@ addEventListener('keydown', anyKeyStart);
       'aria-label',
       approvals.length ? '팀 흐름 열기, 승인 대기 ' + approvals.length + '건' : '팀 흐름 열기',
     );
+    renderOperationalSummary(fleet);
+    renderTeamNetwork(fleet);
     renderTeamHandoffs();
     renderTeamTasks(tasks);
     renderTeamApprovals(approvals);
@@ -6432,34 +7092,57 @@ addEventListener('keydown', anyKeyStart);
   function applyAgentStatus(data, meta = {}) {
     if (!data || typeof data !== 'object') return;
     lastStatusReceivedAt = new Date().toISOString();
-    lastStatusGeneratedAt = clean(meta.generatedAt, 40);
-    dashboardView = normalizeDashboardView(meta);
+    reportedAgentKeys = new Set(Object.keys(data).filter((key) => agentByKey.has(key)));
+    dashboardView = normalizePublicDashboardView({
+      ...meta,
+      publicationMode: meta.publicationMode || RUNTIME_CONFIG.publication?.mode,
+    }, [...agentByKey.keys()], {
+      ttlMs: RUNTIME_CONFIG.status.freshnessTtlMs || 180000,
+      maxFutureSkewMs: RUNTIME_CONFIG.status.maxFutureSkewMs || 300000,
+    });
+    if (!dashboardView.isStale) lastRecoveryAttemptAt = 0;
+    lastStatusGeneratedAt = dashboardView.sourceGeneratedAt;
     for (const a of AGENTS) {
+      if (dashboardView.publicationMode === 'live' && dashboardView.isStale) {
+        setUnknownPublicStatus(a);
+        continue;
+      }
       const s = data[a.key];
-      if (!isRecord(s)) continue;
-      const runtime = isRecord(s.runtime) ? s.runtime : s;
-      const state = clean(s.state, 16);
-      if (state) a.status.state = state;
-      if (typeof s.task === 'string') a.status.task = s.task.trim().slice(0, 80);
-      a.status.updatedAt = clean(s.updatedAt, 40);
-      a.status.progress = Number.isFinite(s.progress)
-        ? THREE.MathUtils.clamp(s.progress, 0, 1)
-        : null;
-      a.status.runId = clean(s.runId, 120);
-      a.status.result = normalizePublicResult(s.result);
-      a.status.results = normalizePublicResults(s.results);
-      a.status.health = normalizeEnum(runtime.health, ['healthy', 'degraded', 'error', 'offline']);
-      a.status.model = clean(runtime.model, 80);
-      a.status.provider = clean(runtime.provider, 40);
-      a.status.blocker = clean(runtime.blocker, 160);
-      a.status.approvalState = normalizeEnum(
-        runtime.approvalState,
-        ['not_required', 'pending', 'approved', 'rejected'],
-      );
-      a.status.riskLevel = normalizeRiskLevel(runtime.riskLevel);
-      a.status.currentTaskId = clean(runtime.currentTaskId, 120);
-      a.status.lastActivityAt = clean(runtime.lastActivityAt, 40) || a.status.updatedAt;
-      a.status.cost = normalizeCost(runtime.cost);
+      if (!isRecord(s)) {
+        if (dashboardView.publicationMode === 'live') {
+          setUnknownPublicStatus(a, '공개 상태가 제공되지 않았습니다.');
+        }
+        continue;
+      }
+      const normalized = normalizePublicAgentStatus(s, {
+        publicationMode: dashboardView.publicationMode,
+      });
+      if (!normalized) continue;
+      if (dashboardView.publicationMode === 'live') {
+        a.status.state = normalized.state || '상태 미확인';
+        a.status.task = normalized.task || '공개 작업 정보 없음';
+      } else {
+        if (normalized.state) a.status.state = normalized.state;
+        if (normalized.task !== null) a.status.task = normalized.task;
+      }
+      const resultProjection = selectPublicResultProjection(s, {
+        publicationMode: dashboardView.publicationMode,
+      });
+      a.status.updatedAt = normalized.updatedAt;
+      a.status.progress = normalized.progress;
+      a.status.result = normalizePublicResult(resultProjection.result);
+      a.status.results = normalizePublicResults(resultProjection.results);
+      a.status.health = normalized.health;
+      a.status.model = normalized.model;
+      a.status.provider = normalized.provider;
+      a.status.blocker = normalized.blocker;
+      a.status.approvalState = normalized.approvalState;
+      a.status.riskLevel = normalized.riskLevel;
+      a.status.currentTaskId = normalized.publicTaskId;
+      a.status.lastActivityAt = normalized.lastActivityAt;
+      a.status.verificationState = normalized.verificationState;
+      a.status.verifiedAt = normalized.verifiedAt;
+      a.status.evidenceDigest = normalized.evidenceDigest;
     }
     ambientAudio.observeAgentStates(AGENTS);
     document.body.dataset.statusSchema = String(meta.schemaVersion ?? 0);
@@ -6468,6 +7151,7 @@ addEventListener('keydown', anyKeyStart);
     syncAgentHomeStatusVisuals();
     refreshOpenServicePanel();
     refreshRecentResultsUi();
+    renderConnectionBadge();
     renderStatusFreshness();
   }
   renderTeamOverview();
@@ -6477,11 +7161,9 @@ addEventListener('keydown', anyKeyStart);
     onSnapshot: applyAgentStatus,
     onConnectionChange(state) {
       connectionState = state;
-      if (connectionEl) {
-        connectionEl.className = `status-connection ${state}`;
-        connectionEl.textContent = ({ live: '실시간', polling: '파일 연동', loading: '연결 중', offline: '오프라인' })[state] || state;
-      }
+      renderConnectionBadge();
       renderStatusFreshness();
+      renderTeamOverview();
     },
   });
   refreshBtn?.addEventListener('click', async () => {
@@ -6516,6 +7198,7 @@ addEventListener('keydown', anyKeyStart);
   const resultsTabBtn = el('resultsTabBtn');
   const servicePane = el('servicePane');
   const resultsPane = el('resultsPane');
+  const mobileInteractBtn = el('mobileInteractBtn');
   let openFor = null;          // agent whose panel is open
   let nearAgent = null;        // agent whose door we're standing at
   let servicePanelOpener = null;
@@ -6644,7 +7327,10 @@ addEventListener('keydown', anyKeyStart);
     const openBtn = el('serviceOpenBtn');
     const url = svc?.url?.trim();
     let parsedUrl = null;
-    try { if (url) parsedUrl = new URL(url, location.href); } catch (_) { /* invalid service URL */ }
+    try {
+      if (url) parsedUrl = new URL(url, location.href);
+      if (parsedUrl && !['http:', 'https:'].includes(parsedUrl.protocol)) parsedUrl = null;
+    } catch (_) { /* invalid service URL */ }
     const localOnly = parsedUrl && LOCAL_HOSTS.has(parsedUrl.hostname);
     const privateOnPublic = !!(localOnly && !IS_LOCAL_RUNTIME);
     const crossOrigin = !!(parsedUrl && parsedUrl.origin !== location.origin);
@@ -6676,7 +7362,7 @@ addEventListener('keydown', anyKeyStart);
     if (parsedUrl && !privateOnPublic && svc.embed && (!crossOrigin || IS_LOCAL_RUNTIME)) {
       const iframe = document.createElement('iframe');
       iframe.src = parsedUrl.href;
-      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-pointer-lock');
+      iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-pointer-lock');
       iframe.title = svc.name;
       frameWrap.appendChild(iframe);
       frameWrap.hidden = false;
@@ -6727,6 +7413,14 @@ addEventListener('keydown', anyKeyStart);
         if (d < bestD) { best = a; bestD = d; }
       }
     }
+    if (mobileInteractBtn) {
+      mobileInteractBtn.disabled = !best;
+      const label = best
+        ? (best.service?.name || best.kor + '의 집') + ' 입장'
+        : '가까운 집 입장';
+      mobileInteractBtn.setAttribute('aria-label', label);
+      mobileInteractBtn.title = label;
+    }
     if (best === nearAgent) return;
     nearAgent = best;
     if (best) {
@@ -6749,10 +7443,15 @@ addEventListener('keydown', anyKeyStart);
       setInteractiveState(promptEl, false);
     }
   };
-  promptEl.addEventListener('click', () => { if (nearAgent) openServicePanel(nearAgent); });
+  activateNearbyService = () => {
+    if (!nearAgent || editMode || openFor || experienceMode !== 'explore') return false;
+    openServicePanel(nearAgent);
+    return true;
+  };
+  promptEl.addEventListener('click', activateNearbyService);
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (k === 'f' && !isUiInteractionTarget(e.target) && nearAgent && !editMode && !openFor) openServicePanel(nearAgent);
+    if (k === 'f' && !isUiInteractionTarget(e.target)) activateNearbyService();
     else if (k === 'escape') closeServicePanel(true);
   });
 })();
@@ -6787,6 +7486,24 @@ if (URL_PARAMS.has('dev')) {
       return editables
         .filter(it => !type || it.data.type === type)
         .map(it => ({ type: it.data.type, n: it.dir.toArray().map(v => +v.toFixed(3)) }));
+    },
+    layoutAudit() {
+      return currentLayoutAudit();
+    },
+    operationsCore() {
+      return editables
+        .filter((item) => item.data.type === 'opsBeacon')
+        .map((item) => {
+          const beacon = item.mesh.userData.opsBeacon;
+          return {
+            n: item.dir.toArray().map((value) => +value.toFixed(3)),
+            nodes: beacon?.nodes.map((node) => ({
+              key: node.key,
+              intensity: +node.material.emissiveIntensity.toFixed(2),
+            })) || [],
+            coreIntensity: +(beacon?.coreMaterial.emissiveIntensity || 0).toFixed(2),
+          };
+        });
     },
     // angular distance from the player to each actual front door
     doorProbe() {

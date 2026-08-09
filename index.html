@@ -13,15 +13,15 @@
 <meta name="twitter:description" content="여섯 AI 에이전트의 작업 상태와 결과물을 보여주는 인터랙티브 3D 항구 행성 대시보드." />
 
 <!-- Content Security Policy (delivered via meta since static hosts can't set headers).
-     Allows: our own files, the Three.js CDN (unpkg), Google Fonts, and the
-     Open-Meteo weather API. No eval, no arbitrary remote scripts. -->
+     Runtime code and visual assets are local; only the optional Open-Meteo
+     weather API is allowed remotely. No eval, no arbitrary remote scripts. -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' 'unsafe-inline' https://unpkg.com;
-  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-  font-src 'self' https://fonts.gstatic.com;
+  script-src 'self';
+  style-src 'self' 'unsafe-inline';
+  font-src 'self';
   img-src 'self' data: blob:;
-  connect-src 'self' https://unpkg.com https://api.open-meteo.com http://localhost:* http://127.0.0.1:*;
+  connect-src 'self' https://api.open-meteo.com http://localhost:* http://127.0.0.1:*;
   frame-src 'self' http://localhost:* http://127.0.0.1:*;
   worker-src 'self' blob:;
   base-uri 'self';
@@ -32,15 +32,7 @@
 <title>Handul Mini Planet — Hermes Agent Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='35%25' cy='30%25' r='70%25'%3E%3Cstop offset='0%25' stop-color='%23b6e6bd'/%3E%3Cstop offset='70%25' stop-color='%2381bfbc'/%3E%3Cstop offset='100%25' stop-color='%235fa3a0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='25' fill='url(%23g)'/%3E%3Cpath d='M18 37c7 4 17 5 28-2' fill='none' stroke='%2336514f' stroke-width='4' stroke-linecap='round' opacity='.45'/%3E%3C/svg%3E" />
 <link rel="manifest" href="manifest.json" />
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
-<link id="appStyles" rel="stylesheet" href="src/style.css?v=65" />
-<script>
-  if (new URLSearchParams(location.search).has('dev')) {
-    document.getElementById('appStyles').href = `src/style.css?dev=${Date.now()}`;
-  }
-</script>
+<link id="appStyles" rel="stylesheet" href="src/style.css?v=71" />
 </head>
 <body class="intro-active">
 <div id="app"></div>
@@ -59,6 +51,7 @@
       <button class="start" id="startBtn" disabled>행성 빚는 중…</button>
       <button class="dashboard-enter" id="exploreModeBtn" disabled>직접 산책하기</button>
     </div>
+    <p class="intro-disclosure" id="introDisclosure">정적 데모 · Hermes 미연결 · 상태와 결과는 공개용 샘플입니다.</p>
     <details class="intro-tools">
       <summary>행성 관리</summary>
       <button class="edit-enter" id="editModeBtn">✏️ 편집 모드</button>
@@ -133,6 +126,14 @@
     <button data-e="😄" aria-label="웃기">😄</button>
     <button data-e="🎉" aria-label="축하하기">🎉</button>
   </div>
+  <div class="mobile-actions" id="mobileActions" aria-label="탐험 동작">
+    <button id="mobileInteractBtn" type="button" aria-label="가까운 집 입장" title="가까운 집 입장" disabled>
+      <span aria-hidden="true">⌂</span>
+    </button>
+    <button id="mobileJumpBtn" type="button" aria-label="점프" title="점프">
+      <span aria-hidden="true">↑</span>
+    </button>
+  </div>
   <div class="stick" id="stick" role="group" aria-label="이동 조이스틱"><div class="knob" id="knob"></div></div>
 
   <!-- ===== Edit mode UI (hidden until edit mode is on) ===== -->
@@ -140,7 +141,10 @@
     <div class="editor-head">
       <div class="editor-heading">
         <div class="editor-title">✏️ 행성 편집</div>
-        <div class="editor-save-state" id="editorSaveState" role="status" aria-live="polite">저장 준비</div>
+        <div class="editor-state-line">
+          <div class="editor-save-state" id="editorSaveState" role="status" aria-live="polite">저장 준비</div>
+          <div class="editor-quality loading" id="editorQuality" title="배치 릴리스 점검">배치 점검 중</div>
+        </div>
       </div>
       <div class="editor-actions">
         <button class="ed-btn editor-history" id="editUndoBtn" disabled title="실행 취소 (Ctrl/⌘+Z)" aria-label="마지막 편집 실행 취소">↶</button>
@@ -186,6 +190,10 @@
 
       <details class="editor-manage">
         <summary>배치 관리</summary>
+        <div class="layout-audit" id="layoutAudit" data-state="loading">
+          <div><span>RELEASE LAYOUT</span><strong id="layoutAuditScore">--</strong></div>
+          <p id="layoutAuditSummary">필수 오브젝트와 이동 충돌을 확인하는 중입니다.</p>
+        </div>
         <div class="editor-manage-actions">
           <button class="ed-btn" id="editExportBtn" title="JSON으로 내보내기">⬇️ 내보내기</button>
           <button class="ed-btn" id="editImportBtn" title="JSON 불러오기">⬆️ 불러오기</button>
@@ -249,6 +257,13 @@
     </button>
   </div>
 
+  <section class="ops-strip card" id="opsStrip" aria-label="에이전트 운영 요약">
+    <div><span>FLEET</span><strong id="opsFleet">0/6</strong><small>coverage</small></div>
+    <div><span>ACTIVE</span><strong id="opsActive">0</strong><small>agents</small></div>
+    <div><span>APPROVAL</span><strong id="opsApproval">0</strong><small>pending</small></div>
+    <div class="ops-link" id="opsLink" data-state="loading"><span>LINK</span><strong id="opsPipeline">CONNECT</strong><small id="opsLinkDetail">bridge</small></div>
+  </section>
+
   <div class="agent-card card" id="agentCard" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="agentName" inert>
     <button class="agent-close" id="agentCardClose" aria-label="에이전트 카드 닫기">✕</button>
     <div class="agent-head">
@@ -281,7 +296,7 @@
       <span id="agentHealth"></span>
       <span id="agentModel"></span>
       <span id="agentRisk"></span>
-      <span id="agentCost"></span>
+      <span id="agentVerification"></span>
     </div>
     <div class="agent-alert" id="agentAlert" role="status" hidden>
       <strong id="agentAlertTitle"></strong>
@@ -316,6 +331,14 @@
       <div><span>APPROVAL</span><strong id="teamMetricApprovals">0</strong><small>pending</small></div>
       <div><span>HEALTH</span><strong id="teamMetricHealth">준비</strong><small>runtime</small></div>
     </div>
+
+    <section class="team-section team-network-section" aria-labelledby="teamNetworkTitle">
+      <div class="team-section-head">
+        <h3 id="teamNetworkTitle">AGENT NETWORK</h3>
+        <span id="teamNetworkSummary">0 / 6 확인</span>
+      </div>
+      <div class="team-network" id="teamNetwork"></div>
+    </section>
 
     <section class="team-section" aria-labelledby="teamHandoffTitle">
       <div class="team-section-head">
@@ -389,76 +412,6 @@
   <button id="appNoticeAction" type="button" hidden></button>
 </div>
 
-<script>
-  function showMiniPlanetBootError() {
-    for (const id of ['startBtn', 'exploreModeBtn']) {
-      const button = document.getElementById(id);
-      if (button) { button.disabled = true; button.textContent = '새로고침 필요'; }
-    }
-    const loading = document.getElementById('introLoading');
-    if (loading) {
-      loading.textContent = '3D 모듈을 불러오지 못했습니다. 네트워크를 확인한 뒤 페이지를 새로고침해주세요.';
-      loading.classList.add('error');
-    }
-    const retry = document.getElementById('bootRetryBtn');
-    if (retry) retry.hidden = false;
-  }
-  // surface a friendly message if the 3D module fails to load (e.g. CDN/network down)
-  window.addEventListener('error', (event) => {
-    const isScriptLoadError = event.target && event.target.tagName === 'SCRIPT';
-    const startBtn = document.getElementById('startBtn');
-    if (!isScriptLoadError || !startBtn || !startBtn.disabled) return;
-    showMiniPlanetBootError();
-  }, true);
-  window.addEventListener('mini-planet-load-error', showMiniPlanetBootError);
-  document.getElementById('bootRetryBtn')?.addEventListener('click', () => location.reload());
-</script>
-
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
-
-<script type="module">
-  const dev = new URLSearchParams(location.search).has('dev');
-  import(`./src/main.js?${dev ? `dev=${Date.now()}` : 'v=65'}`)
-    .catch((error) => {
-      console.error('Mini Planet boot failed', error);
-      window.dispatchEvent(new Event('mini-planet-load-error'));
-    });
-</script>
-
-<!-- register the service worker for offline caching (progressive enhancement).
-     Skipped with ?dev=1 so development always loads fresh code. -->
-<script>
-  if ('serviceWorker' in navigator) {
-    const dev = new URLSearchParams(location.search).has('dev');
-    window.addEventListener('load', () => {
-      if (dev) {
-        const appScope = new URL('./', location.href).href;
-        navigator.serviceWorker.getRegistrations().then((registrations) =>
-          Promise.all(registrations
-            .filter((registration) => registration.scope === appScope)
-            .map((registration) => registration.unregister()))
-        ).catch(() => {});
-      } else {
-        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((registration) => {
-          registration.addEventListener('updatefound', () => {
-            const worker = registration.installing;
-            worker?.addEventListener('statechange', () => {
-              if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-                window.dispatchEvent(new Event('mini-planet-update-ready'));
-              }
-            });
-          });
-        }).catch(() => {});
-      }
-    });
-  }
-</script>
+<script type="module" src="src/boot.js?v=71"></script>
 </body>
 </html>

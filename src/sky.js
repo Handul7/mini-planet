@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from '../vendor/three/build/three.module.min.js';
 
 /**
  * Owns every atmospheric concern: sky dome, stars, clouds, rain, lighting,
@@ -202,8 +202,8 @@ export function createSkySystem({
       + weatherVisual.cloud * 0.00006
       + weatherVisual.precip * 0.00034;
 
-    sun.intensity = (0.60 + day * 0.80) * weatherDim;
-    hemi.intensity = (0.84 + day * 0.42) * (0.96 + weatherDim * 0.04);
+    sun.intensity = (0.68 + day * 0.72) * weatherDim;
+    hemi.intensity = (0.94 + day * 0.32) * (0.96 + weatherDim * 0.04);
     sun.color.copy(palette.moonLight)
       .lerp(palette.sunLight, day)
       .lerp(palette.twilightSun, twilight * 0.72)
@@ -225,7 +225,7 @@ export function createSkySystem({
     celestial.polarisHalo.material.opacity = 0.01 + (1 - day) * 0.15;
     stars.opacity = 0.75 * (1 - day) + 0.05;
 
-    renderer.toneMappingExposure = 1.10 + day * 0.04
+    renderer.toneMappingExposure = 1.14 + day * 0.02
       - weatherVisual.cloud * 0.025
       - weatherVisual.precip * 0.035;
     vignettePass.uniforms.tint.value.copy(palette.nightTint)

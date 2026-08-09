@@ -20,11 +20,10 @@
     "permissionLevels": "자율 실행 가능한 L1~L4 enum 목록",
     "approvalRequiredFor": "명시적 승인이 필요한 L4 작업",
     "restrictions": "역할 경계를 지키기 위한 금지·위임 규칙",
-    "channel": "대표 협업 채널",
+    "channel": "공개용 협업 영역 이름",
     "activityStyle": "3D 상태 행동에 사용할 시각 motif id",
     "visual": "3D 캐릭터 실루엣·복장·도구를 정하는 공개 비주얼 프로필",
     "resultSpace": "향후 각 에이전트 집에 연결할 개인 결과 공간 메타데이터",
-    "sourceFiles": "실제 내용이나 경로가 아닌 원천 파일 이름만 표시",
     "fantasy": "《별의 공명자들》 판타지 정체성",
     "lines": "말풍선 대사 (2~4개 권장)",
     "defaultStatus": "agent-status.json이 없거나 키가 빠졌을 때의 기본 상태"
@@ -64,7 +63,6 @@
   "agents": [
     {
       "key": "rodi",
-      "profileKey": "rodi",
       "name": "Rodi",
       "kor": "로디",
       "emoji": "🎼",
@@ -90,7 +88,7 @@
       "restrictions": ["L4 작업을 승인 없이 실행하지 않음", "전문 판단을 임의로 덮어쓰지 않음"],
       "permissionLevels": ["L1", "L2", "L3"],
       "autonomy": "L1–L3 자율 · L4 승인 라우팅",
-      "channel": "#rodi · #team",
+      "channel": "팀 조율",
       "activityStyle": "conductor",
       "visual": {
         "style": "companion-conductor",
@@ -107,16 +105,13 @@
         "summary": "통합 브리핑, 결정 기록, 팀이 함께 만든 최종 결과를 보는 로디의 집",
         "status": "active"
       },
-      "sourceFiles": ["SOUL.md", "AGENTS.md", "profile.yaml"],
       "fantasy": "별의 목소리를 잇는 조율자",
-      "soul": "목표를 분해하고 역할을 나누며 검증과 최종 보고를 통합한다. 팀이 한 방향으로 움직이게 하고 한들의 결정권을 보존한다.",
       "tagline": "흩어진 여섯을 한 박자로 묶는 조율자",
       "lines": ["한 박자로 갑시다 🎼", "담당과 다음 단계를 정리했어요", "이 결정은 한들에게 남겨둘게요"],
       "defaultStatus": { "state": "대기 중", "task": "팀 조율" }
     },
     {
       "key": "jarvis",
-      "profileKey": "jarvis",
       "name": "Jarvis",
       "kor": "자비스",
       "emoji": "🎩",
@@ -142,7 +137,7 @@
       "restrictions": ["웹 조사·크롤링은 Argos에 위임", "코드 구현은 Yul에 위임", "L4 직접 실행 금지"],
       "permissionLevels": ["L1", "L2", "L3"],
       "autonomy": "L1–L3 운영 자율",
-      "channel": "#jarvis",
+      "channel": "운영 브리핑",
       "activityStyle": "clock",
       "visual": {
         "style": "clockwork-owl",
@@ -157,16 +152,13 @@
         "summary": "일정, 브리핑, 루틴과 자동화 결과를 정돈해서 보는 자비스의 집",
         "status": "active"
       },
-      "sourceFiles": ["SOUL.md", "AGENTS.md", "profile.yaml"],
       "fantasy": "시간의 흐름을 지키는 기계 올빼미",
-      "soul": "일정, 루틴, 크론, 브리핑과 기록 보존을 맡는다. 침착하고 정중하게 위험과 누락을 낮춘다.",
       "tagline": "잊힌 일을 제시간에 되돌려 놓는 조용한 참모",
       "lines": ["기록 보존 중 🎩", "브리핑 준비 완료", "다음 일정까지 여유가 있습니다"],
       "defaultStatus": { "state": "대기 중", "task": "운영 정리" }
     },
     {
       "key": "yul",
-      "profileKey": "yul",
       "name": "Yul",
       "kor": "율",
       "emoji": "🎵",
@@ -192,7 +184,7 @@
       "restrictions": ["웹 조사·크롤링은 Argos에 위임", "최종 안전 판정은 Ludwig에 요청"],
       "permissionLevels": ["L1", "L2", "L3"],
       "autonomy": "L1–L3 구현 자율",
-      "channel": "#yul",
+      "channel": "구현 작업",
       "activityStyle": "circuit",
       "visual": {
         "style": "resonance-engineer",
@@ -209,16 +201,13 @@
         "summary": "코드, 자동화, 빌드와 재현 가능한 동작 결과를 살펴보는 율의 집",
         "status": "active"
       },
-      "sourceFiles": ["SOUL.md", "AGENTS.md", "profile.yaml"],
       "fantasy": "소리와 신호를 잇는 공명공학자",
-      "soul": "코드, 파일, 자동화, 구현과 동작 검증을 맡는다. 증거와 재현 절차를 남기며 반복되는 일은 도구로 굳힌다.",
       "tagline": "들은 울림을 실제로 작동하는 노래로 만드는 기술자",
       "lines": ["이건 코드로 굳히자 🎵", "재현했고 동작도 확인했어요", "검증관에게 넘길 준비가 됐습니다"],
       "defaultStatus": { "state": "대기 중", "task": "구현 대기" }
     },
     {
       "key": "ludwig",
-      "profileKey": "ludwig",
       "name": "Ludwig",
       "kor": "루드비히",
       "emoji": "📖",
@@ -244,7 +233,7 @@
       "restrictions": ["파일·설정을 직접 수정하지 않음", "구현 담당과 검증 담당을 섞지 않음"],
       "permissionLevels": ["L1"],
       "autonomy": "L1 검증 전용",
-      "channel": "#ludwig",
+      "channel": "검증 게이트",
       "activityStyle": "proof",
       "visual": {
         "style": "moonlight-scholar",
@@ -261,16 +250,13 @@
         "summary": "검증 보고서, 근거, Caution과 No-go 판정을 확인하는 루드비히의 집",
         "status": "active"
       },
-      "sourceFiles": ["SOUL.md", "AGENTS.md", "profile.yaml"],
       "fantasy": "달빛의 공명학자",
-      "soul": "논리, 근거, 보안, 정합성과 위험을 독립적으로 검토한다. 직접 수정하지 않고 확인된 사실과 남은 불확실성을 판정한다.",
       "tagline": "말할 수 있는 것과 아직 말할 수 없는 것을 가르는 학자",
       "lines": ["근거가 필요합니다 📖", "사실과 가정을 나누겠습니다", "판정은 Caution입니다"],
       "defaultStatus": { "state": "대기 중", "task": "검증 대기" }
     },
     {
       "key": "anne",
-      "profileKey": "anne",
       "name": "Anne",
       "kor": "앤",
       "emoji": "🖌️",
@@ -296,7 +282,7 @@
       "restrictions": ["공개 전 Ludwig 검토 요청", "사실 검증이 필요한 조사는 Argos에 위임"],
       "permissionLevels": ["L1", "L2", "L3"],
       "autonomy": "L1–L3 창작 자율 · 공개 전 검토",
-      "channel": "#anne",
+      "channel": "콘텐츠 작업",
       "activityStyle": "paint",
       "visual": {
         "style": "forest-atelier",
@@ -313,16 +299,13 @@
         "summary": "글, 이미지, 시안과 이름 붙은 창작 결과를 전시하는 앤의 집",
         "status": "active"
       },
-      "sourceFiles": ["SOUL.md", "AGENTS.md", "profile.yaml"],
       "fantasy": "향기를 세공하는 숲의 요정",
-      "soul": "글, 이미지, 표현과 콘텐츠를 만든다. 감정과 장면성을 포착하되 언제나 사용할 수 있는 작업물로 되돌아온다.",
       "tagline": "평범한 순간에 이름과 향기와 빛을 붙이는 창조자",
       "lines": ["이 장면을 그려볼게요 🖌️", "향기까지 느껴지게 해보자", "사용할 수 있는 시안으로 정리했어요"],
       "defaultStatus": { "state": "대기 중", "task": "창작 대기" }
     },
     {
       "key": "argos",
-      "profileKey": "argos",
       "name": "Argos",
       "kor": "아르고스",
       "emoji": "🦉",
@@ -348,7 +331,7 @@
       "restrictions": ["채택 결정을 대신하지 않음", "시스템 운영 모니터링은 Jarvis·Yul에 위임", "안전 판정은 Ludwig에 이관"],
       "permissionLevels": ["L1", "L2", "L3"],
       "autonomy": "L1–L3 조사 자율",
-      "channel": "#argos",
+      "channel": "리서치 관측",
       "activityStyle": "observer",
       "visual": {
         "style": "quiet-field-observer",
@@ -365,9 +348,7 @@
         "summary": "출처가 있는 조사 보고서, 관측 기록과 Wiki 적재 결과를 보는 아르고스의 등대",
         "status": "active"
       },
-      "sourceFiles": ["SOUL.md", "AGENTS.md", "profile.yaml"],
       "fantasy": "백 개의 눈을 가진 파수꾼",
-      "soul": "웹과 문서에서 정보를 찾아 출처와 함께 요약한다. 관찰과 해석을 구분하고, 채택은 로디에게 안전 판정은 루드비히에게 넘긴다.",
       "tagline": "멀리 있는 신호를 출처와 함께 가져오는 백 개의 눈",
       "lines": ["새 관측 결과가 있습니다 🦉", "출처 세 곳을 교차 확인했어요", "여기까지는 관찰, 다음은 해석입니다"],
       "defaultStatus": { "state": "대기 중", "task": "외부 관측" }

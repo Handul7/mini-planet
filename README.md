@@ -1,6 +1,6 @@
 # 🌍 Handul Mini Planet — Interactive Hermes Village
 
-A tiny low-poly 3D planet that doubles as a **living dashboard for the Hermes agent team**.
+A tiny low-poly 3D planet that doubles as a **public showcase and dashboard shell for the Hermes agent team**.
 Six resonators from 《별의 공명자들》 stroll a cel-shaded miniature world with live weather;
 click any of them and the camera glides over while their status card opens — and every
 cottage is the **front door of one of Handul's services**.
@@ -38,11 +38,11 @@ and up to six sanitized recent results without adding another central building.
 
 ## ✨ Features
 
-- **Public homepage entrance** — the live 3D world remains visible behind a focused landing card;
-  one primary CTA enters the village, while dashboard and edit tools stay secondary.
+- **Public homepage entrance** — the live 3D world remains visible behind an unframed title layer;
+  one primary CTA enters the village, while walk and edit tools stay secondary.
 - **Visitor checklist + avatar color** — an on-demand paper panel teaches the three core interactions
   and remembers progress locally; a second tile lets visitors recolor their traveler without an account.
-- **The planet is the dashboard** — a team bar lists all six agents with live states;
+- **The planet is the dashboard** — a team bar lists all six agents with published states;
   clicking an agent (in 3D or on the bar) opens a status card with their role, fantasy
   identity, public SOUL summary, channel, autonomy boundary, core responsibilities, compact
   voice/value/home notes, and current task. Hermes runtime health, model alias, risk, approval, and blocker appear
@@ -50,14 +50,14 @@ and up to six sanitized recent results without adding another central building.
 - **Observation camera** — agent focus keeps the agent and their home in one unobstructed frame.
   An optional nine-second auto patrol visits all six agents; any direct camera or navigation input
   stops it immediately.
-- **Read-only team flow** — the team bar opens a compact Team Overview with live metrics,
+- **Read-only team flow** — the team bar opens a compact Team Overview with published metrics,
   role-based handoff routes, sanitized v2 tasks, and pending L4 approvals. Before Hermes is
   connected it shows quiet empty states; it never submits runs or approves actions.
 - **Houses are services** — stand at any cottage door (prompt appears → `F` or tap) or
   click the house to open its **service / recent results panel**: description, online/offline check,
   "새 창에서 열기", an optional embedded live preview, and up to six public result cards.
   The house→service map is [`config/services.json`](config/services.json) — edit freely.
-- **Live status data** — edit [`agent-status.json`](agent-status.json) and the planet
+- **Status snapshot boundary** — edit [`agent-status.json`](agent-status.json) and the planet
   updates (~1 min polling or the manual refresh button). The team bar shows the last successful
   check separately from the source timestamp, and its recent-results shortcut opens the newest
   agent home exhibition in one step. This is the Hermes integration point — see below.
@@ -76,6 +76,12 @@ and up to six sanitized recent results without adding another central building.
   Live states add restrained role-specific motifs: Rodi conducts, Jarvis keeps time, Yul
   traces a circuit, Ludwig reviews proofs, Anne shapes petals, and Argos observes. Review,
   completion, and error states change the same motif instead of spawning permanent clutter.
+- **Agent signature homes** — each public `visual.style` maps to a lightweight code-native
+  landmark: Rodi's harmonic fork, Jarvis's clock crown, Yul's signal array, Ludwig's
+  crescent archive, Anne's atelier flower, and Argos's observer ring. The catalog lives in
+  [`src/agent-signatures.js`](src/agent-signatures.js), while geometry stays in
+  [`src/main.js`](src/main.js). Updating a style without a registered signature fails the
+  release tests instead of silently producing a generic home.
 - **Live weather (Open-Meteo)** — bright side shows **Seoul** weather, dark side **Rio**;
   cloud cover, day/night-aware rain streaks, wind-driven foliage/flags, and harbor motion
   reflect real conditions. WMO weather kinds keep snow/fog from masquerading as rain, and
@@ -87,21 +93,21 @@ and up to six sanitized recent results without adding another central building.
   (computed locally, no API), the sun and moon swap cleanly at dawn/dusk, and
   **Polaris** shines above the north pole where a Little Prince rose grows as
   the planet's fixed reference point.
-- **Installable PWA** — network-first app updates plus cached local assets and
-  runtime-cached Three.js modules for fast repeat loads. A first online load is
-  still required before the 3D module can be available offline.
+- **Installable PWA** — network-first app updates plus a complete local app shell.
+  The pinned Three.js runtime ships in-repository, so the 3D world does not depend
+  on a third-party CDN at launch.
 
 ## 🎮 Controls
 
-| Action | Desktop | Mobile |
-|--------|---------|--------|
-| Move | `W A S D` / Arrows (automatically enters Explore mode) | Virtual joystick |
-| Jump | `Space` | — |
-| Enter a house (service) | `F` at the door, or click the house | Tap the door prompt / house |
-| Look / Zoom | Drag / Wheel | Drag / Pinch |
-| Agent card | Click an agent or the team bar | Tap |
-| Ambient sound | `♬` in the weather chip (muted by default) | Tap `♬` |
-| Edit mode | Header `편집`, intro button, or `E` | Header `편집` or the pencil tile |
+| Action | Desktop | Mobile | Standard gamepad |
+|--------|---------|--------|------------------|
+| Move | `W A S D` / Arrows (automatically enters Explore mode) | Virtual joystick | Left stick / D-pad |
+| Jump | `Space` | `↑` action button | A |
+| Enter a house (service) | `F` at the door, or click the house | `⌂` near a door / tap the house | X |
+| Look / Zoom | Drag / Wheel | Drag / Pinch | Right stick |
+| Agent card | Click an agent, team bar, or press `1`–`6` | Tap | — |
+| Ambient sound | `♬` in the weather chip (muted by default) | Tap `♬` | — |
+| Edit mode | Header `편집`, intro button, or `E` | Header `편집` or the pencil tile | — |
 
 **Edit mode:** click to select, drag to move, `[` `]` rotate, `-` `=` scale,
 `Ctrl+D`/⧉ duplicate, `Delete` remove, `Ctrl/⌘+Z` undo and `Ctrl/⌘+Shift+Z` redo
@@ -128,39 +134,50 @@ For deterministic atmosphere QA, development mode also accepts
 | File | What it controls |
 |------|------------------|
 | [`config/agents.json`](config/agents.json) | Public team projection: identity/voice/value summaries, role, responsibility, channel, permissions, handoffs, activity motif, config-driven character visual, home result-space metadata, color, speech |
-| [`config/services.json`](config/services.json) | House→service map: name, description, url, icon, embedded preview on/off, run note |
-| [`config/runtime.json`](config/runtime.json) | Status transport plus reload-time public result fallback URL |
+| [`config/services.json`](config/services.json) | Public house→service map. Only reviewed HTTPS URLs and visitor-safe notes |
+| `config/services.local.json` | Optional local-only service override; ignored by Git |
+| [`config/runtime.json`](config/runtime.json) | Publication mode, freshness policy, status transport, public result fallback |
 | [`config/site.json`](config/site.json) | Public title, description, canonical URL, homepage link, GitHub link |
-| [`agent-status.json`](agent-status.json) | **Live** states — the file Hermes (or anything else) keeps writing |
+| [`agent-status.json`](agent-status.json) | v2 public status snapshot. The repository default is an explicit static demo |
 | [`agent-results.json`](agent-results.json) | Curated public result fallback for the six home exhibitions |
 
-Rules of thumb: an agent's `key` ties all three files together; a service with an empty
-`url` shows as **준비 중**; `embed: true` shows a live iframe preview (best for
-`http://localhost:…` apps running on the same machine).
+Rules of thumb: an agent's public `key` ties the files together; a service with an empty
+`url` shows as **준비 중**. Keep private endpoints and launch notes in the ignored
+`config/services.local.json`; the public config accepts reviewed HTTPS services only.
 
 ## 🤖 헤르메스 연동 (prepared, not connected yet)
 
-The default runtime polls `agent-status.json` every 60 s. It accepts the original
-top-level agent map and a versioned bridge envelope, so deployment can later switch
-to a same-origin SSE endpoint without changing the 3D scene or dashboard:
+The default runtime polls a clearly labeled static sample every 60 s. A verified bridge
+can later switch to a same-origin v2 endpoint without changing the 3D scene or dashboard:
 
 ```json
 {
-  "rodi":  { "state": "작업 중", "task": "아침 브리핑 검토", "progress": 0.6, "updatedAt": "2026-07-07T09:12:00+09:00" },
-  "argos": { "state": "수집 중", "task": "AI 뉴스 크롤링",   "updatedAt": "2026-07-07T09:10:00+09:00" }
+  "schemaVersion": 2,
+  "publicationMode": "live",
+  "sourceGeneratedAt": "2026-07-29T09:12:00+09:00",
+  "bridgeObservedAt": "2026-07-29T09:12:05+09:00",
+  "expiresAt": "2026-07-29T09:15:05+09:00",
+  "isStale": false,
+  "source": "hermes-public-bridge",
+  "agents": {
+    "rodi": { "state": "작업 중", "publicTask": "공개 브리핑 검토", "progress": 0.6 }
+  },
+  "tasks": [],
+  "approvals": []
 }
 ```
 
 - `state` → badge on the team bar & card (keywords color it: 작업/진행 = amber,
   검증/리뷰 = violet, 오류/실패 = red, else green). Max 16 chars.
-- `task` → shown on the card and sometimes in the agent's speech bubble. Max 80 chars.
+- `publicTask` → human-approved public task summary. Raw task text is ignored in live mode.
 - `updatedAt` (optional, ISO 8601) → "N분 전 갱신" on the card.
 - `progress` (optional, `0..1`) → progress bar on the card.
-- `result` (optional) → the sanitized current result shown first.
-- `results` (optional, newest-first, max 6) → sanitized recent result history for the owner's home.
-- `runtime` (optional) → allowlisted health, model/provider alias, risk level,
-  approval state, blocker, current task id, activity time, and optional public cost.
-- v2 top-level `tasks` and `approvals` → sanitized Team Flow and read-only Approval Inbox.
+- `publicResult` (optional) → the explicitly published current result shown first.
+- `publicResults` (optional, newest-first, max 6) → explicitly published result history.
+- `runtime` (optional) → allowlisted health, coarse `modelFamily`/`providerAlias`, risk,
+  approval, `publicBlocker`, public task id, activity time, and verification fields.
+- v2 `tasks` and `approvals` require `publicTitle` and `publicActionSummary`; raw text fields are ignored.
+- Missing or expired freshness metadata degrades every live agent to **상태 미확인**.
 - Unknown keys are ignored; missing agents keep their `defaultStatus` from
   `config/agents.json`.
 
@@ -183,19 +200,25 @@ The home-based exhibition direction is recorded in
 
 ```
 .
-├── index.html              # markup, CSP, import map, HUD + dashboard + service panel + editor UI
+├── index.html              # markup, strict script CSP, HUD + dashboard + service panel + editor UI
 ├── src/
+│   ├── boot.js             # module boot, friendly failure state, service-worker lifecycle
 │   ├── main.js             # scene orchestration, world, agents, dashboard, services, editor
 │   ├── sky.js              # weather, clouds, rain, lighting, celestial bodies, day/night
 │   ├── ambient-audio.js    # opt-in procedural ocean/wind/rain + completion chime
 │   ├── performance.js      # adaptive Retina DPR, shadow cadence, and weather render budget
 │   ├── agent-activity.js   # shared status semantics + role-specific 3D activity motifs
+│   ├── agent-signatures.js # visual.style → distinct home landmark contract
+│   ├── input-controls.js   # deadzone-safe standard gamepad input projection
 │   ├── agent-results.js    # public result normalization, merging, labels, safe links
 │   ├── status-source.js    # polling/SSE transport boundary for Hermes status
+│   ├── public-dashboard.js # allowlist task/approval/status projection + freshness policy
+│   ├── release-quality.js  # fleet summary and deterministic layout release audit
 │   └── style.css           # UI styling (HUD, cards, team bar, service panel, editor, intro)
 ├── config/
 │   ├── agents.json         # the roster — edit me!
 │   ├── services.json       # house→service map — edit me!
+│   ├── services.local.json # optional local override — ignored by Git
 │   ├── site.json           # public homepage metadata + links
 │   └── runtime.json        # status transport settings
 ├── docs/
@@ -204,18 +227,22 @@ The home-based exhibition direction is recorded in
 │   └── home-result-spaces.md # implemented per-agent result rooms and artifact boundary
 ├── agent-status.json       # live agent states — Hermes writes me!
 ├── agent-results.json      # curated public fallback for home result spaces
+├── assets/fonts/           # pinned Nunito WOFF2 weights + OFL license
 ├── manifest.json           # PWA manifest
 ├── sw.js                   # network-first app updates + repeat/offline asset cache
 ├── scripts/
-│   └── validate-predeploy.mjs # zero-dependency schema/cache/syntax/privacy checks
+│   └── validate-predeploy.mjs # zero-dependency schema/cache/syntax/privacy/GLTF checks
+├── tests/
+│   └── *.test.mjs          # public contract, transport, and release-quality tests
+├── vendor/three/           # pinned Three.js core + only the add-ons we import
 ├── .github/workflows/
 │   └── deploy.yml          # GitHub Pages auto-deploy
 ├── LICENSE                 # MIT
 └── README.md
 ```
 
-No build step, no bundler — the browser loads `src/main.js` as an ES module, which imports
-the focused local modules above and pulls Three.js from a CDN via the import map.
+No build step, no bundler — `src/boot.js` loads the app as native ES modules, and every
+Three.js import resolves directly to the pinned local runtime.
 
 ## 🚀 Run locally
 
@@ -240,8 +267,8 @@ frame-time average, shadow cadence, rain budget, and draw statistics.
 
 The whole folder is a static site — copy it anywhere. The included GitHub Actions
 workflow publishes to GitHub Pages on every push to `main` (Settings → Pages → Source:
-**GitHub Actions**). Any static host (Netlify, Vercel, Cloudflare Pages) works too —
-HTTPS required for the CDN and weather API.
+**GitHub Actions**). Any static host (Netlify, Vercel, Cloudflare Pages) works too.
+HTTPS is required for service workers and the optional weather API.
 
 Before publishing, set the public links in `config/site.json`:
 
@@ -253,31 +280,30 @@ Before publishing, set the public links in `config/site.json`:
 }
 ```
 
-Blank values are intentionally hidden. This lets forks and local previews work without broken links.
-All app URLs are relative, so project Pages URLs such as `https://name.github.io/mini-planet/` work
-without a build-time base path. On a public host, localhost-only service notes and buttons are replaced
-with a neutral **개인 네트워크** state instead of exposing local launch instructions.
-
-> Note: service URLs pointing at `http://localhost:…` only resolve on the machine
-> running those services. On a public deploy, either leave them (they'll show
-> 오프라인) or point them at public URLs in `config/services.json`.
+Blank values are intentionally hidden. All app URLs are relative, so project Pages URLs such as
+`https://name.github.io/mini-planet/` work without a build-time base path. Local endpoints and
+launch notes belong in `config/services.local.json`, which is loaded only on a loopback host and
+is excluded from Git.
 
 Run the same zero-dependency gate used by GitHub Actions before committing a release:
 
 ```bash
 node scripts/validate-predeploy.mjs
+node --test tests/*.test.mjs
 ```
 
 The Pages workflow validates JSON schemas and six-agent key parity, checks every JavaScript
 module's syntax, verifies the service-worker shell/cache version, and scans the public agent
-projection for local paths or obvious secrets. Deployment runs only after this job passes.
+projection for local paths, private fields, local endpoints, and obvious secrets. Contract tests
+also verify fail-closed future schemas, public-only task text, projection caps, and stale behavior.
 
 ## 🛠️ Tech
 
-- [Three.js](https://threejs.org/) `0.160.0` (unpkg CDN via import map)
+- [Three.js](https://threejs.org/) `0.160.0` (pinned local ES module; MIT notice in `vendor/three`)
+- [Nunito](https://fontsource.org/fonts/nunito) `5.2.6` package assets (local WOFF2; OFL license in `assets/fonts`)
 - [Open-Meteo API](https://open-meteo.com/) for key-less live weather
 - `localStorage` for the village layout; service worker + manifest for installable PWA and repeat-load caching
-- Meta-tag **Content-Security-Policy** restricting scripts/connections to self + CDN + weather API (+ localhost for service panels)
+- Meta-tag **Content-Security-Policy** restricting scripts to self and connections to self + weather API (+ localhost for service panels)
 - Plain HTML / CSS / JS — no bundler, nothing to install
 
 ## 📄 License

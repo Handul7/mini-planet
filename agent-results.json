@@ -1,6 +1,7 @@
 {
   "_설명": "집의 최근 결과 탭에 표시하는 공개용 정적 샘플입니다. 배포 후에는 Hermes 브리지가 같은 필드만 정제해 제공하며 SOUL, 프롬프트, 로그, 로컬 경로는 포함하지 않습니다.",
   "schemaVersion": 1,
+  "publicationMode": "static-demo",
   "generatedAt": "2026-07-17T00:00:00+09:00",
   "source": "curated-static",
   "agents": {
