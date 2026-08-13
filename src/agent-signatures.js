@@ -1,17 +1,17 @@
 export const AGENT_SIGNATURES = Object.freeze({
   'companion-conductor': Object.freeze({
     id: 'harmonic-fork',
-    label: '공명 지휘탑',
+    label: '북극성 공명 지휘탑',
     motion: 'pulse',
   }),
-  'clockwork-owl': Object.freeze({
-    id: 'clock-crown',
-    label: '시간 관제 시계',
+  'clockwork-steward': Object.freeze({
+    id: 'chronicle-dial',
+    label: '시간기록 문장',
     motion: 'clock',
   }),
-  'resonance-engineer': Object.freeze({
-    id: 'signal-array',
-    label: '공명 신호탑',
+  'resonance-listener': Object.freeze({
+    id: 'resonance-fork',
+    label: '금선 공명 청취탑',
     motion: 'scan',
   }),
   'moonlight-scholar': Object.freeze({
@@ -24,9 +24,9 @@ export const AGENT_SIGNATURES = Object.freeze({
     label: '향기 아틀리에 표식',
     motion: 'turn',
   }),
-  'quiet-field-observer': Object.freeze({
-    id: 'observer-ring',
-    label: '원거리 관측 링',
+  'star-warden-observer': Object.freeze({
+    id: 'owl-observatory',
+    label: '별지기 올빼미 관측대',
     motion: 'observe',
   }),
 });

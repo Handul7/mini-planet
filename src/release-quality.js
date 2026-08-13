@@ -107,9 +107,24 @@ function surfaceDistance(a, b, planetRadius) {
   return Math.acos(dot) * planetRadius;
 }
 
+const HOME_VIEW_CLEARANCE = 3.5;
+const HOME_APPROACH_CLEARANCE = 0.42;
+
+function interpolateDirection(a, b, t) {
+  const out = [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+  const length = Math.hypot(out[0], out[1], out[2]);
+  return length > 0 ? out.map((part) => part / length) : a;
+}
+
 /**
  * Audit release-critical layout invariants without depending on Three.js.
- * Entries are point props shaped as { type, ownerKey, n:[x,y,z], radius }.
+ * Entries are point props shaped as
+ * { type, ownerKey, n:[x,y,z], radius, doorN?, approachN? }.
+ * `radius` is an angular radius, matching the runtime's spherical colliders.
  */
 export function auditLayout({
   entries = [],
@@ -124,6 +139,8 @@ export function auditLayout({
     ownerKey: typeof entry?.ownerKey === 'string' ? entry.ownerKey : '',
     n: normalizedVector(entry?.n),
     radius: Number.isFinite(entry?.radius) ? Math.max(0, entry.radius) : 0,
+    doorN: normalizedVector(entry?.doorN),
+    approachN: normalizedVector(entry?.approachN),
   }));
   const errors = [];
   const warnings = [];
@@ -151,16 +168,52 @@ export function auditLayout({
     for (let j = i + 1; j < collidable.length; j++) {
       const a = collidable[i];
       const b = collidable[j];
-      const required = Math.max(0.12, (a.radius + b.radius) * 0.72);
+      const required = Math.max(0.12, (a.radius + b.radius) * planetRadius * 0.72);
       const distance = surfaceDistance(a.n, b.n, planetRadius);
       if (distance >= required) continue;
       overlaps.push({ a: a.index, b: b.index, aType: a.type, bType: b.type, distance, required });
     }
   }
   if (overlaps.length) warnings.push(`이동 충돌 가능 배치: ${overlaps.length}쌍`);
+  const homeClearance = [];
+  const homes = points.filter((point) => point.n && point.ownerKey);
+  for (let i = 0; i < homes.length; i++) {
+    for (let j = i + 1; j < homes.length; j++) {
+      const distance = surfaceDistance(homes[i].n, homes[j].n, planetRadius);
+      if (distance >= HOME_VIEW_CLEARANCE) continue;
+      homeClearance.push({
+        a: homes[i].ownerKey,
+        b: homes[j].ownerKey,
+        distance,
+        required: HOME_VIEW_CLEARANCE,
+      });
+    }
+  }
+  if (homeClearance.length) warnings.push(`집 사이 시야 여백 부족: ${homeClearance.length}쌍`);
+  const doorObstructions = [];
+  for (const home of homes) {
+    if (!home.doorN || !home.approachN) continue;
+    const samples = [0, 0.34, 0.67, 1].map((t) => interpolateDirection(home.doorN, home.approachN, t));
+    for (const obstacle of collidable) {
+      if (obstacle.index === home.index) continue;
+      const required = obstacle.radius * planetRadius + HOME_APPROACH_CLEARANCE;
+      const distance = Math.min(...samples.map((sample) => surfaceDistance(sample, obstacle.n, planetRadius)));
+      if (distance >= required) continue;
+      doorObstructions.push({
+        owner: home.ownerKey,
+        obstacle: obstacle.index,
+        obstacleType: obstacle.type,
+        distance,
+        required,
+      });
+    }
+  }
+  if (doorObstructions.length) warnings.push(`집 진입로 방해 오브젝트: ${doorObstructions.length}개`);
   if ((Array.isArray(entries) ? entries.length : 0) > maxEntries) errors.push(`오브젝트 제한 초과: ${entries.length}/${maxEntries}`);
 
-  const score = Math.max(0, 100 - errors.length * 24 - warnings.length * 7 - Math.min(20, overlaps.length * 2));
+  const score = Math.max(0, 100 - errors.length * 24 - warnings.length * 7
+    - Math.min(20, overlaps.length * 2) - Math.min(12, homeClearance.length * 3)
+    - Math.min(15, doorObstructions.length * 3));
   const status = errors.length ? 'blocked' : warnings.length ? 'review' : 'ready';
   return {
     status,
@@ -168,6 +221,8 @@ export function auditLayout({
     errors,
     warnings,
     overlaps,
+    homeClearance,
+    doorObstructions,
     missingOwners,
     duplicateOwners,
     objectCount: points.length,

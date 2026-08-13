@@ -1,23 +1,23 @@
 // Service worker — caches the complete local app shell for offline / fast repeat loads.
 // Same-origin code is network-first so releases do not stick.
 const CACHE_PREFIX = 'handul-planet-';
-const CACHE = CACHE_PREFIX + 'v71';
+const CACHE = CACHE_PREFIX + 'v76';
 const SHELL = [
   './',
   './index.html',
-  './src/boot.js?v=71',
-  './src/main.js?v=71',
+  './src/boot.js?v=76',
+  './src/main.js?v=76',
   './src/status-source.js?v=70',
   './src/public-dashboard.js?v=70',
-  './src/release-quality.js?v=70',
+  './src/release-quality.js?v=75',
   './src/sky.js?v=70',
   './src/ambient-audio.js?v=62',
   './src/performance.js?v=63',
   './src/agent-activity.js?v=70',
   './src/agent-results.js?v=60',
-  './src/agent-signatures.js?v=71',
+  './src/agent-signatures.js?v=72',
   './src/input-controls.js?v=71',
-  './src/style.css?v=71',
+  './src/style.css?v=76',
   './assets/fonts/nunito-latin-600-normal.woff2',
   './assets/fonts/nunito-latin-700-normal.woff2',
   './assets/fonts/nunito-latin-800-normal.woff2',

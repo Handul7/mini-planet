@@ -1,9 +1,16 @@
 {
   "name": "Handul Mini Planet",
   "short_name": "Mini Planet",
-  "description": "A tiny low-poly 3D planet with a clearly labeled public demo of the Hermes agent dashboard, live weather, and a real-phase moon.",
+  "description": "여섯 AI 에이전트의 작업 상태와 결과물을 보여주는 인터랙티브 3D 항구 행성 대시보드.",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
+  "lang": "ko",
+  "dir": "ltr",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
   "display": "standalone",
   "orientation": "any",
   "background_color": "#dceff7",

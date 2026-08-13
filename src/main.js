@@ -10,7 +10,7 @@ import { createSkySystem } from './sky.js?v=70';
 import { createAmbientAudio } from './ambient-audio.js?v=62';
 import { createAgentActivityTools } from './agent-activity.js?v=70';
 import { createPerformanceGovernor } from './performance.js?v=63';
-import { signatureForAgent } from './agent-signatures.js?v=71';
+import { signatureForAgent } from './agent-signatures.js?v=72';
 import { readGamepadControls } from './input-controls.js?v=71';
 import {
   cleanPublicText,
@@ -20,7 +20,7 @@ import {
   normalizePublicDashboardView,
   selectPublicResultProjection,
 } from './public-dashboard.js?v=70';
-import { auditLayout, summarizeFleet } from './release-quality.js?v=70';
+import { auditLayout, summarizeFleet } from './release-quality.js?v=75';
 import {
   formatResultDate,
   mergePublicResults,
@@ -265,7 +265,7 @@ function showAppNotice(message, { actionLabel = '', onAction = null, sticky = fa
   const safe = (v, fallback = '') => typeof v === 'string' && v.trim() ? v.trim() : fallback;
   const title = safe(SITE_CONFIG.title, 'Handul Mini Planet');
   const description = safe(SITE_CONFIG.metaDescription, SITE_CONFIG.description);
-  document.title = `${title} — Hermes Agent Dashboard`;
+  document.title = `${title} — AI Agent Dashboard`;
   document.getElementById('introKicker').textContent = safe(SITE_CONFIG.kicker, 'A LIVING AGENT VILLAGE');
   const titleWords = title.split(/\s+/);
   const titleEl = document.getElementById('introTitle');
@@ -277,17 +277,16 @@ function showAppNotice(message, { actionLabel = '', onAction = null, sticky = fa
     titleEl.replaceChildren(first, rest);
   }
   document.getElementById('introDescription').textContent = safe(SITE_CONFIG.description);
-  for (const selector of ['meta[name="description"]', 'meta[property="og:description"]', 'meta[name="twitter:description"]']) {
+  for (const selector of ['#siteDescription', '#ogDescription', '#twitterDescription']) {
     document.querySelector(selector)?.setAttribute('content', description);
   }
-  document.querySelector('meta[property="og:title"]')?.setAttribute('content', title);
-  document.querySelector('meta[name="twitter:title"]')?.setAttribute('content', title);
+  document.getElementById('ogSiteName')?.setAttribute('content', title);
+  document.getElementById('ogTitle')?.setAttribute('content', title);
+  document.getElementById('twitterTitle')?.setAttribute('content', title);
   const publicUrl = safe(SITE_CONFIG.publicUrl);
   if (publicUrl) {
-    const canonical = document.createElement('link');
-    canonical.rel = 'canonical'; canonical.href = publicUrl; document.head.appendChild(canonical);
-    const ogUrl = document.createElement('meta');
-    ogUrl.setAttribute('property', 'og:url'); ogUrl.content = publicUrl; document.head.appendChild(ogUrl);
+    document.getElementById('canonicalUrl')?.setAttribute('href', publicUrl);
+    document.getElementById('ogUrl')?.setAttribute('content', publicUrl);
   }
   const links = [
     ['homepageLink', safe(SITE_CONFIG.homepageUrl)],
@@ -1129,12 +1128,13 @@ function addAgentHomeSignature(root, ownerKey) {
   }
 
   const color = configHex(agent?.color, 0x81bfbc);
+  const glowColor = configHex(agent?.visual?.glowColor, color);
   const accent = toonMat(color);
   const dark = toonMat(0x4f5c61);
   const pale = toonMat(0xf5f2e8);
   const glow = new THREE.MeshToonMaterial({
-    color,
-    emissive: color,
+    color: glowColor,
+    emissive: glowColor,
     emissiveIntensity: 0.44,
     gradientMap: TOON_GRAD,
   });
@@ -1156,22 +1156,29 @@ function addAgentHomeSignature(root, ownerKey) {
     const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.10, 0.13), accent);
     bridge.position.y = 0.75;
     const forkGeometry = new THREE.CylinderGeometry(0.045, 0.045, 0.56, 6);
-    const left = new THREE.Mesh(forkGeometry, accent);
+    const left = new THREE.Mesh(forkGeometry, pale);
     const right = left.clone();
     left.position.set(-0.22, 1.00, 0);
     right.position.set(0.22, 1.00, 0);
     const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), glow);
     star.position.y = 1.38;
-    [mast, bridge, left, right, star].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
+    const repair = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.018, 5, 12), glow);
+    repair.rotation.x = Math.PI / 2;
+    repair.position.set(0, 0.53, 0);
+    [mast, bridge, left, right, repair, star].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
     addOutline(bridge, 1.035);
     addOutline(star, 1.055);
     motion.pivot = star;
-  } else if (spec.id === 'clock-crown') {
+  } else if (spec.id === 'chronicle-dial') {
     signature.position.set(0, 4.08, 0.30);
     const face = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.10, 16), pale);
     face.rotation.x = Math.PI / 2;
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.052, 6, 20), accent);
     rim.position.z = 0.06;
+    const memoryRingA = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.022, 6, 20), glow);
+    const memoryRingB = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.016, 6, 18), glow);
+    memoryRingA.position.z = 0.075;
+    memoryRingB.position.z = 0.085;
     const hour = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.22, 0.035), dark);
     hour.position.set(-0.07, 0.08, 0.13);
     hour.rotation.z = 0.72;
@@ -1180,23 +1187,35 @@ function addAgentHomeSignature(root, ownerKey) {
     const minute = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.29, 0.035), glow);
     minute.position.y = 0.13;
     minutePivot.add(minute);
-    [face, rim, hour].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
+    [face, rim, memoryRingA, memoryRingB, hour].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
     signature.add(minutePivot);
     addOutline(face, 1.025);
     motion.pivot = minutePivot;
-  } else if (spec.id === 'signal-array') {
+  } else if (spec.id === 'resonance-fork') {
     signature.position.set(-0.62, 3.58, -0.08);
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.075, 1.02, 6), dark);
     mast.position.y = 0.51;
     const scan = new THREE.Group();
     scan.position.y = 1.02;
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.035, 6, 20), accent);
-    const barA = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.055, 0.07), accent);
-    const barB = barA.clone();
-    barA.rotation.z = 0.55;
-    barB.rotation.z = -0.55;
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.075, 0.08), pale);
+    bridge.position.y = -0.10;
+    const tineA = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.56, 7), pale);
+    const tineB = tineA.clone();
+    tineA.position.set(-0.19, 0.18, 0);
+    tineB.position.set(0.19, 0.18, 0);
+    const repair = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.018, 5, 12), glow);
+    repair.rotation.x = Math.PI / 2;
+    repair.position.y = -0.26;
     const node = new THREE.Mesh(new THREE.IcosahedronGeometry(0.105, 1), glow);
-    [ring, barA, barB, node].forEach((mesh) => { mesh.castShadow = true; scan.add(mesh); });
+    node.position.y = 0.52;
+    [-0.34, 0.34].forEach((x, index) => {
+      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.085, 0), accent);
+      crystal.scale.y = 1.5;
+      crystal.position.set(x, 0.04 + index * 0.05, 0);
+      crystal.rotation.z = (index ? -1 : 1) * 0.38;
+      scan.add(crystal);
+    });
+    [bridge, tineA, tineB, repair, node].forEach((mesh) => { mesh.castShadow = true; scan.add(mesh); });
     signature.add(mast, scan);
     addOutline(node, 1.05);
     motion.pivot = scan;
@@ -1212,7 +1231,9 @@ function addAgentHomeSignature(root, ownerKey) {
     bookLow.position.set(0.52, -0.21, -0.02);
     bookHigh.position.set(0.48, -0.09, -0.02);
     bookHigh.rotation.z = 0.08;
-    [crescent, bookLow, bookHigh].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
+    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.11, 0.06), glow);
+    lock.position.set(0.50, -0.03, 0.18);
+    [crescent, bookLow, bookHigh, lock].forEach((mesh) => { mesh.castShadow = true; signature.add(mesh); });
     addOutline(crescent, 1.04);
     motion.pivot = crescent;
     motion.baseY = crescent.position.y;
@@ -1242,9 +1263,14 @@ function addAgentHomeSignature(root, ownerKey) {
     centre.castShadow = true;
     flower.add(petals, centre);
     signature.add(stem, flower);
+    [0x8db9a4, 0xd6a2bd, 0xe8c66e].forEach((bottleColor, index) => {
+      const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.20, 7), toonMat(bottleColor));
+      bottle.position.set(-0.18 + index * 0.18, -0.30, 0.03);
+      signature.add(bottle);
+    });
     addOutline(centre, 1.05);
     motion.pivot = flower;
-  } else if (spec.id === 'observer-ring') {
+  } else if (spec.id === 'owl-observatory') {
     signature.position.set(0, 6.24, 0);
     const orbit = new THREE.Group();
     orbit.rotation.x = 0.58;
@@ -1265,7 +1291,9 @@ function addAgentHomeSignature(root, ownerKey) {
     ring.castShadow = true;
     lenses.castShadow = true;
     orbit.add(ring, lenses);
-    signature.add(orbit);
+    const owl = makeBronzeOwlVessel(0.72);
+    owl.position.set(0, -0.48, 0.12);
+    signature.add(orbit, owl);
     motion.pivot = orbit;
   }
 
@@ -1274,6 +1302,104 @@ function addAgentHomeSignature(root, ownerKey) {
   root.userData.signatureSpec = spec;
   root.userData.signatureRoot = signature;
   root.userData.signatureMotion = motion;
+}
+
+function addAgentHomeFacade(root, ownerKey, kind = 'cottage') {
+  if (!root || !ownerKey || root.userData.facadeKey === ownerKey) return;
+  const agent = AGENT_CONFIG.find((candidate) => candidate.key === ownerKey);
+  const spec = signatureForAgent(agent);
+  if (!agent || !spec) return;
+
+  const color = configHex(agent.color, 0x81bfbc);
+  const glowColor = configHex(agent.visual?.glowColor, color);
+  const accent = toonMat(color);
+  const glow = toonMat(glowColor);
+  const pale = toonMat(0xf4f1e8);
+  const dark = toonMat(0x4b5058);
+  const marker = new THREE.Group();
+  marker.name = ownerKey + '-home-facade';
+  marker.position.set(0, kind === 'lighthouse' ? 2.45 : 2.18, kind === 'lighthouse' ? 0.79 : 1.69);
+  marker.scale.setScalar(kind === 'lighthouse' ? 0.82 : 1);
+  const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.52, 0.07), dark);
+  plaque.castShadow = true;
+  marker.add(plaque);
+
+  if (ownerKey === 'rodi') {
+    const polaris = new THREE.Mesh(new THREE.OctahedronGeometry(0.105, 0), glow);
+    polaris.scale.y = 1.35;
+    polaris.position.z = 0.07;
+    marker.add(polaris);
+    [[-0.22, 0.13], [0.20, 0.15], [-0.15, -0.15], [0.18, -0.12]].forEach(([x, y]) => {
+      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.027, 0), pale);
+      star.position.set(x, y, 0.07);
+      marker.add(star);
+    });
+  } else if (ownerKey === 'jarvis') {
+    [0.20, 0.135, 0.075].forEach((radius, index) => {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.018, 6, 18), index ? glow : accent);
+      ring.position.z = 0.07 + index * 0.006;
+      marker.add(ring);
+    });
+    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.14, 0.018), pale);
+    hand.position.set(0.035, 0.045, 0.105);
+    hand.rotation.z = -0.52;
+    marker.add(hand);
+  } else if (ownerKey === 'yul') {
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.045, 0.03), pale);
+    bridge.position.set(0, -0.09, 0.075);
+    [-0.10, 0.10].forEach(x => {
+      const tine = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.25, 0.03), pale);
+      tine.position.set(x, 0.05, 0.075);
+      marker.add(tine);
+    });
+    const repair = new THREE.Mesh(new THREE.TorusGeometry(0.047, 0.012, 5, 10), glow);
+    repair.position.set(0, -0.16, 0.08);
+    [-0.24, 0.24].forEach((x, index) => {
+      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.065, 0), accent);
+      crystal.scale.y = 1.35;
+      crystal.position.set(x, 0.03, 0.075);
+      crystal.rotation.z = (index ? -1 : 1) * 0.35;
+      marker.add(crystal);
+    });
+    marker.add(bridge, repair);
+  } else if (ownerKey === 'ludwig') {
+    const book = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.27, 0.045), accent);
+    book.position.z = 0.075;
+    const pages = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.21, 0.025), pale);
+    pages.position.z = 0.105;
+    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.03), glow);
+    lock.position.set(0, 0, 0.13);
+    marker.add(book, pages, lock);
+  } else if (ownerKey === 'anne') {
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.045, 0.04), pale);
+    shelf.position.set(0, -0.15, 0.075);
+    [0x8db9a4, 0xd6a2bd, 0xe8c66e].forEach((bottleColor, index) => {
+      const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.20, 7), toonMat(bottleColor));
+      bottle.position.set(-0.16 + index * 0.16, -0.035, 0.075);
+      marker.add(bottle);
+    });
+    const ribbon = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.018, 5, 14, Math.PI * 1.55), accent);
+    ribbon.position.set(0, 0.13, 0.08);
+    ribbon.rotation.z = -0.65;
+    marker.add(shelf, ribbon);
+  } else if (ownerKey === 'argos') {
+    const eye = new THREE.Mesh(new THREE.TorusGeometry(0.20, 0.035, 6, 20), glow);
+    eye.scale.y = 0.62;
+    eye.position.z = 0.08;
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.062, 8, 6), accent);
+    pupil.position.z = 0.105;
+    [-0.24, 0.24].forEach((x, index) => {
+      const featherEye = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.014, 5, 12), pale);
+      featherEye.position.set(x, -0.11 + index * 0.04, 0.08);
+      marker.add(featherEye);
+    });
+    marker.add(eye, pupil);
+  }
+
+  root.add(marker);
+  root.userData.facadeKey = ownerKey;
+  root.userData.facadeRoot = marker;
+  root.userData.homeCanonStyle = spec.id;
 }
 
 function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '' } = {}) {
@@ -1337,6 +1463,7 @@ function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '
   g.userData.homeLabelOffset = new THREE.Vector3(0, 3.95, 1.62);
   g.userData.homeFlagOffset = new THREE.Vector3(1.35, 0, 2.25);
   g.userData.doorOffset = new THREE.Vector3(0, 0, 2.15);
+  addAgentHomeFacade(g, ownerKey);
   addAgentHomeSignature(g, ownerKey);
   return g;
 }
@@ -1460,8 +1587,9 @@ function makeTetrapod() {
 
 function makeLighthouse(ownerKey = '') {
   const g = new THREE.Group();
-  const white = toonMat(0xfbfaf5);
-  const red = toonMat(0xe5524b);
+  const owner = AGENT_CONFIG.find((candidate) => candidate.key === ownerKey);
+  const white = toonMat(ownerKey === 'argos' ? 0xeeeaf2 : 0xfbfaf5);
+  const accent = toonMat(configHex(owner?.color, 0xe5524b));
   const stone = toonMat(0xa8a3a2);
   const stoneTop = toonMat(0xc7c1b3);
   const apronBase = new THREE.Mesh(
@@ -1478,11 +1606,11 @@ function makeLighthouse(ownerKey = '') {
   base.position.y = 0.24;
   const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.92, 4.3, 12), white);
   tower.position.y = 2.55;
-  const bandLow = new THREE.Mesh(new THREE.CylinderGeometry(0.84, 0.91, 0.54, 12), red);
+  const bandLow = new THREE.Mesh(new THREE.CylinderGeometry(0.84, 0.91, 0.54, 12), accent);
   bandLow.position.y = 1.42;
-  const bandHigh = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.72, 0.5, 12), red);
+  const bandHigh = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.72, 0.5, 12), accent);
   bandHigh.position.y = 3.48;
-  const gallery = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.88, 0.16, 12), red);
+  const gallery = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.88, 0.16, 12), accent);
   gallery.position.y = 4.78;
   const lanternMat = new THREE.MeshToonMaterial({
     color: 0xffe5a1, emissive: 0xf2a52f, emissiveIntensity: 0.85,
@@ -1490,19 +1618,19 @@ function makeLighthouse(ownerKey = '') {
   });
   const lanternRoom = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.7, 10), lanternMat);
   lanternRoom.position.y = 5.18;
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(0.72, 0.62, 10), red);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(0.72, 0.62, 10), accent);
   roof.position.y = 5.85;
   const door = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.18, 0.08), toonMat(0x765a4d));
   door.position.set(0, 0.86, 0.87);
 
   const rail = new THREE.Group();
-  const railRing = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.035, 6, 24), red);
+  const railRing = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.035, 6, 24), accent);
   railRing.rotation.x = Math.PI / 2;
   railRing.position.y = 5.02;
   rail.add(railRing);
   for (let i = 0; i < 8; i++) {
     const angle = i / 8 * Math.PI * 2;
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.28, 6), red);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.28, 6), accent);
     post.position.set(Math.cos(angle) * 0.78, 4.94, Math.sin(angle) * 0.78);
     rail.add(post);
   }
@@ -1529,6 +1657,7 @@ function makeLighthouse(ownerKey = '') {
   g.userData.homeLabelOffset = new THREE.Vector3(0, 6.35, 0.5);
   g.userData.homeFlagOffset = new THREE.Vector3(1.25, 0, 1.15);
   g.userData.doorOffset = new THREE.Vector3(0, 0, 1.28);
+  addAgentHomeFacade(g, ownerKey, 'lighthouse');
   addAgentHomeSignature(g, ownerKey);
   return g;
 }
@@ -2417,11 +2546,18 @@ function serializeLayout() {
 function currentLayoutAudit() {
   const entries = editables.map((item) => {
     const def = PROP_DEFS[item.data.type] || {};
+    const isHome = item.data.type === 'cottage' || item.data.type === 'lighthouse';
+    const doorDir = isHome ? homeDoorDir(item) : null;
+    const approachDir = isHome
+      ? offsetSurfaceDir(item.data.dir, propFacing(item.data.dir, item.data.yaw || 0), 0.42)
+      : null;
     return {
       type: item.data.type,
       ownerKey: item.data.ownerKey || '',
       n: item.data.dir?.toArray?.() || null,
       radius: (def.collider || 0) * (def.baseScale ?? 1) * (item.data.scale ?? 1),
+      doorN: doorDir?.toArray() || null,
+      approachN: approachDir?.toArray() || null,
     };
   });
   return auditLayout({
@@ -2452,6 +2588,111 @@ function buildLayout(layout) {
 const LAYOUT_KEY = 'HandulPlanet_layout_harbor_v3';
 const LAYOUT_BACKUP_KEY = 'HandulPlanet_layout_backups_v1';
 const LAYOUT_SCHEMA_VERSION = 2;
+const HOME_PALETTE_MIGRATIONS = Object.freeze({
+  rodi: Object.freeze({ fromWall: 0xf3ecd8, fromRoof: 0xd8af45, wall: 0xe8e9ed, roof: 0x1f2a44 }),
+  jarvis: Object.freeze({ fromWall: 0xe3eaed, fromRoof: 0x71879e, wall: 0xdce3e6, roof: 0x4f6f8f }),
+  yul: Object.freeze({ fromWall: 0xdcecea, fromRoof: 0x63b5b1, wall: 0xdbe7e4, roof: 0x1c4f5a }),
+  ludwig: Object.freeze({ fromWall: 0xe9e4ee, fromRoof: 0x9188bd, wall: 0xe3e4e9, roof: 0x737d91 }),
+  anne: Object.freeze({ fromWall: 0xf2e1df, fromRoof: 0xe38c88, wall: 0xe6eee5, roof: 0x8faf8f }),
+});
+const HARBOR_SPACING_MIGRATIONS = Object.freeze([
+  { type: 'terrace', from: { x: -0.28, z: 0.76, yaw: -0.08, rx: 0.84, rz: 0.46 }, to: { x: 0, z: 0.98, yaw: 0, rx: 0.54, rz: 0.34 } },
+  { type: 'terrace', from: { x: 0.55, z: 0.18, yaw: -0.12, rx: 0.68, rz: 0.40 }, to: { x: 0.82, z: 0.52, yaw: -0.08, rx: 0.46, rz: 0.57 } },
+  { type: 'terrace', from: { x: -0.62, z: 0.24, yaw: 0.14, rx: 0.60, rz: 0.39 }, to: { x: -0.84, z: 0.52, yaw: 0.08, rx: 0.46, rz: 0.57 } },
+  { type: 'cottage', ownerKey: 'rodi', from: { x: -0.08, z: 0.84, yaw: 2.96, scale: 0.72 }, to: { x: 0, z: 1.03, yaw: 3.08, scale: 0.66 } },
+  { type: 'cottage', ownerKey: 'rodi', from: { x: 0, z: 0.98, yaw: 3.08, scale: 0.66 }, to: { x: 0, z: 1.03, yaw: 3.08, scale: 0.66 } },
+  { type: 'cottage', ownerKey: 'jarvis', from: { x: -0.53, z: 0.62, yaw: 2.30, scale: 0.68 }, to: { x: -0.72, z: 0.84, yaw: 2.68, scale: 0.61 } },
+  { type: 'cottage', ownerKey: 'yul', from: { x: 0.34, z: 0.36, yaw: -2.44, scale: 0.70 }, to: { x: 0.68, z: 0.84, yaw: -2.68, scale: 0.62 } },
+  { type: 'cottage', ownerKey: 'ludwig', from: { x: -0.67, z: 0.18, yaw: 1.72, scale: 0.66 }, to: { x: -0.98, z: 0.20, yaw: 1.68, scale: 0.58 } },
+  { type: 'cottage', ownerKey: 'anne', from: { x: 0.66, z: 0.04, yaw: -1.84, scale: 0.68 }, to: { x: 0.98, z: 0.20, yaw: -1.68, scale: 0.58 } },
+  { type: 'netRack', from: { x: -1.02, z: -0.27, yaw: 0.16 }, to: { x: -0.58, z: -0.30, yaw: 0.08 } },
+  { type: 'rock', from: { x: -1.54, z: -0.08, yaw: 0.20, scale: 1.08 }, to: { x: -1.42, z: -0.34, yaw: 0.20, scale: 1.08 } },
+  { type: 'rock', from: { x: 1.55, z: -0.06, yaw: 0.40, scale: 1.04 }, to: { x: 1.42, z: -0.34, yaw: 0.40, scale: 1.04 } },
+  { type: 'busStop', from: { x: 1.34, z: 0.08, yaw: -1.48, scale: 0.80 }, to: { x: 0.66, z: -0.20, yaw: -1.44, scale: 0.80 } },
+  { type: 'bench', from: { x: -1.02, z: 0.06, yaw: 1.44, scale: 0.84 }, to: { x: -0.46, z: -0.08, yaw: 1.50, scale: 0.84 } },
+  { type: 'utilityPole', from: { x: -1.54, z: 0.21, yaw: 3.142, scale: 0.76 }, to: { x: -1.24, z: 0.46, yaw: 3.142, scale: 0.76 } },
+  { type: 'coastPine', from: { x: -1.18, z: 0.58, yaw: -0.10, scale: 0.70 }, to: { x: -1.28, z: 0.72, yaw: -0.10, scale: 0.64 } },
+  { type: 'camellia', from: { x: 0.15, z: 1.15, yaw: 0.20, scale: 0.64 }, to: { x: 0.30, z: 1.18, yaw: 0.20, scale: 0.60 } },
+  { type: 'camellia', from: { x: 1.18, z: 0.54, yaw: -0.30, scale: 0.66 }, to: { x: 1.28, z: 0.70, yaw: -0.30, scale: 0.60 } },
+  { type: 'bench', from: { n: [0, -0.735, -0.679], yaw: 3.142, scale: 0.92 }, to: { n: [0.40, -0.75, -0.52], yaw: 3.142, scale: 0.92 } },
+]);
+
+function migrateCanonicalHomePalette(layout) {
+  for (const entry of layout) {
+    if (entry?.type !== 'cottage') continue;
+    const palette = HOME_PALETTE_MIGRATIONS[entry.ownerKey];
+    if (!palette) continue;
+    // Only migrate the exact former default pair. Any user-customized color is
+    // treated as intentional and remains untouched.
+    if (entry.wall === palette.fromWall && entry.roof === palette.fromRoof) {
+      entry.wall = palette.wall;
+      entry.roof = palette.roof;
+    }
+  }
+  return layout;
+}
+
+function canonicalMapYaw(x, z, yaw) {
+  const dir = mapDir(x, z);
+  const oldForward = mapForward(Math.sin(yaw || 0), Math.cos(yaw || 0));
+  const basis = tangentBasis(dir);
+  return Math.atan2(oldForward.dot(basis.east), oldForward.dot(basis.north));
+}
+
+function wrappedAngle(value) {
+  return Math.atan2(Math.sin(value), Math.cos(value));
+}
+
+function migrateHarborSpacing(layout) {
+  for (const entry of layout) {
+    if (!entry || entry.kind === 'path') continue;
+    const legacyPosition = Number.isFinite(entry.x) && Number.isFinite(entry.z);
+    for (const migration of HARBOR_SPACING_MIGRATIONS) {
+      if (entry.type !== migration.type) continue;
+      if (migration.ownerKey && entry.ownerKey !== migration.ownerKey) continue;
+      const fromUsesDirection = Array.isArray(migration.from.n);
+      const toUsesDirection = Array.isArray(migration.to.n);
+      const fromDirection = fromUsesDirection
+        ? new THREE.Vector3(...migration.from.n).normalize()
+        : mapDir(migration.from.x, migration.from.z);
+      const toDirection = toUsesDirection
+        ? new THREE.Vector3(...migration.to.n).normalize()
+        : mapDir(migration.to.x, migration.to.z);
+      let positionMatches = false;
+      if (legacyPosition && !fromUsesDirection) {
+        positionMatches = Math.hypot(entry.x - migration.from.x, entry.z - migration.from.z) < 0.02;
+      } else if (Array.isArray(entry.n) && entry.n.length === 3) {
+        const savedDir = new THREE.Vector3(entry.n[0], entry.n[1], entry.n[2]).normalize();
+        positionMatches = savedDir.angleTo(fromDirection) < 0.003;
+      }
+      if (!positionMatches) continue;
+
+      const oldYaw = legacyPosition
+        ? migration.from.yaw
+        : fromUsesDirection
+          ? migration.from.yaw
+          : canonicalMapYaw(migration.from.x, migration.from.z, migration.from.yaw);
+      const newYaw = legacyPosition
+        ? migration.to.yaw
+        : toUsesDirection
+          ? migration.to.yaw
+          : canonicalMapYaw(migration.to.x, migration.to.z, migration.to.yaw);
+      entry.yaw = wrappedAngle(newYaw + wrappedAngle((entry.yaw || 0) - oldYaw));
+      if (legacyPosition) {
+        entry.x = migration.to.x;
+        entry.z = migration.to.z;
+      } else {
+        entry.n = toDirection.toArray();
+      }
+      for (const field of ['scale', 'rx', 'rz']) {
+        if (!Number.isFinite(migration.from[field]) || !Number.isFinite(entry[field])) continue;
+        if (Math.abs(entry[field] - migration.from[field]) < 0.015) entry[field] = migration.to[field];
+      }
+      break;
+    }
+  }
+  return layout;
+}
 
 // Validate & clamp an untrusted layout (imported JSON / localStorage) into
 // entries that are guaranteed safe to spawn. Invalid entries are dropped, so
@@ -2516,7 +2757,7 @@ function sanitizeLayout(raw) {
       out.push(d);
     }
   }
-  return out.length ? out : null;
+  return out.length ? migrateHarborSpacing(migrateCanonicalHomePalette(out)) : null;
 }
 
 // read a saved layout from localStorage, or null if none / unreadable.
@@ -2873,18 +3114,19 @@ const HARBOR_FRONT_LAYOUT = [
   // active front-side agents. It replaces several decorative props.
   { type: 'workPlaza', x: 0.02, z: 0.18, yaw: -0.05, rx: 0.82, rz: 0.43 },
   { type: 'opsBeacon', x: 0.02, z: 0.18, yaw: 0.0, scale: 1.0 },
-  // Three shallow landings break the old crown-shaped row into a 2 + 2 + 1
-  // hillside composition. They are broad masses, not extra decoration.
-  { type: 'terrace', x: -0.28, z: 0.76, yaw: -0.08, rx: 0.84, rz: 0.46 },
-  { type: 'terrace', x: 0.55,  z: 0.18, yaw: -0.12, rx: 0.68, rz: 0.40 },
-  { type: 'terrace', x: -0.62, z: 0.24, yaw: 0.14, rx: 0.60, rz: 0.39 },
+  // One rear landing and two side shelves create a wide 1 + 2 + 2 village.
+  // The open wedges between them preserve clear views from the operations core.
+  { type: 'terrace', x: 0, z: 0.98, yaw: 0, rx: 0.54, rz: 0.34 },
+  { type: 'terrace', x: 0.82, z: 0.52, yaw: -0.08, rx: 0.46, rz: 0.57 },
+  { type: 'terrace', x: -0.84, z: 0.52, yaw: 0.08, rx: 0.46, rz: 0.57 },
 
-  // Five service homes, deliberately staggered in height, angle, and size.
-  { type: 'cottage', ownerKey: 'rodi',   x: -0.08, z: 0.84, yaw: 2.96, scale: 0.72, wall: 0xf3ecd8, roof: 0xd8af45 },
-  { type: 'cottage', ownerKey: 'jarvis', x: -0.53, z: 0.62, yaw: 2.30, scale: 0.68, wall: 0xe3eaed, roof: 0x71879e },
-  { type: 'cottage', ownerKey: 'yul',    x: 0.34,  z: 0.36, yaw: -2.44, scale: 0.70, wall: 0xdcecea, roof: 0x63b5b1 },
-  { type: 'cottage', ownerKey: 'ludwig', x: -0.67, z: 0.18, yaw: 1.72, scale: 0.66, wall: 0xe9e4ee, roof: 0x9188bd },
-  { type: 'cottage', ownerKey: 'anne',   x: 0.66,  z: 0.04, yaw: -1.84, scale: 0.68, wall: 0xf2e1df, roof: 0xe38c88 },
+  // Rodi anchors the rear ridge; paired homes sit on the west/east shoulders.
+  // Smaller footprints and a wider arc keep every facade and roof mark legible.
+  { type: 'cottage', ownerKey: 'rodi',   x: 0, z: 1.03, yaw: 3.08, scale: 0.66, wall: 0xe8e9ed, roof: 0x1f2a44 },
+  { type: 'cottage', ownerKey: 'jarvis', x: -0.72, z: 0.84, yaw: 2.68, scale: 0.61, wall: 0xdce3e6, roof: 0x4f6f8f },
+  { type: 'cottage', ownerKey: 'yul',    x: 0.68, z: 0.84, yaw: -2.68, scale: 0.62, wall: 0xdbe7e4, roof: 0x1c4f5a },
+  { type: 'cottage', ownerKey: 'ludwig', x: -0.98, z: 0.20, yaw: 1.68, scale: 0.58, wall: 0xe3e4e9, roof: 0x737d91 },
+  { type: 'cottage', ownerKey: 'anne',   x: 0.98, z: 0.20, yaw: -1.68, scale: 0.58, wall: 0xe6eee5, roof: 0x8faf8f },
 
   // The harbor is one readable scene: two boats, two stalls, and a handful
   // of working props. The open water and clear lane do most of the work.
@@ -2896,23 +3138,23 @@ const HARBOR_FRONT_LAYOUT = [
   { type: 'marketStall', x: 0.30,  z: -0.41, yaw: -0.04, color: 0x6f9eb2 },
   { type: 'fishCrate', x: -0.78, z: -0.16, yaw: 0.28, scale: 0.84 },
   { type: 'fishCrate', x: 0.66,  z: -0.13, yaw: -0.18, scale: 0.78 },
-  { type: 'netRack', x: -1.02, z: -0.27, yaw: 0.16, scale: 0.88 },
+  { type: 'netRack', x: -0.58, z: -0.30, yaw: 0.08, scale: 0.88 },
 
   // Shoreline punctuation: enough geometry to draw the coast, with gaps so
   // it never becomes a necklace of identical objects.
-  { type: 'rock', x: -1.54, z: -0.08, yaw: 0.2, scale: 1.08 },
+  { type: 'rock', x: -1.42, z: -0.34, yaw: 0.2, scale: 1.08 },
   { type: 'rock', x: -0.93, z: -0.29, yaw: 2.0, scale: 0.70 },
   { type: 'rock', x: 0.05,  z: -0.35, yaw: 0.8, scale: 0.62 },
   { type: 'rock', x: 0.94,  z: -0.27, yaw: 1.5, scale: 0.74 },
-  { type: 'rock', x: 1.55,  z: -0.06, yaw: 0.4, scale: 1.04 },
-  { type: 'busStop', x: 1.34, z: 0.08, yaw: -1.48, scale: 0.80 },
-  { type: 'bench', x: -1.02, z: 0.06, yaw: 1.44, scale: 0.84 },
-  { type: 'utilityPole', x: -1.54, z: 0.21, yaw: 3.142, scale: 0.76 },
+  { type: 'rock', x: 1.42,  z: -0.34, yaw: 0.4, scale: 1.04 },
+  { type: 'busStop', x: 0.66, z: -0.20, yaw: -1.44, scale: 0.80 },
+  { type: 'bench', x: -0.46, z: -0.08, yaw: 1.50, scale: 0.84 },
+  { type: 'utilityPole', x: -1.24, z: 0.46, yaw: 3.142, scale: 0.76 },
 
   // Three vegetation masses frame the homes; agent colors remain the accents.
-  { type: 'coastPine', x: -1.18, z: 0.58, yaw: -0.1, scale: 0.70 },
-  { type: 'camellia', x: 0.15, z: 1.15, yaw: 0.2, scale: 0.64 },
-  { type: 'camellia', x: 1.18, z: 0.54, yaw: -0.3, scale: 0.66 },
+  { type: 'coastPine', x: -1.28, z: 0.72, yaw: -0.1, scale: 0.64 },
+  { type: 'camellia', x: 0.30, z: 1.18, yaw: 0.2, scale: 0.60 },
+  { type: 'camellia', x: 1.28, z: 0.70, yaw: -0.3, scale: 0.60 },
 
   // Six larger tetrapods imply the two breakwater arms without repeating the
   // same silhouette ten times.
@@ -2926,9 +3168,9 @@ const HARBOR_FRONT_LAYOUT = [
 
 const HARBOR_REAR_LAYOUT = [
   // Argos inherits the old far-side-home contract, but his home is now the
-  // white-and-red lighthouse and participates in the same service interaction.
+  // violet-and-white lighthouse and participates in the same service interaction.
   { type: 'lighthouse', ownerKey: 'argos', n: [0, -0.505, -0.863], yaw: 3.142, scale: 0.86 },
-  { type: 'bench', n: [0.00, -0.735, -0.679], yaw: 3.142, scale: 0.92 },
+  { type: 'bench', n: [0.40, -0.75, -0.52], yaw: 3.142, scale: 0.92 },
   { type: 'lantern', n: [-0.12, -0.69, -0.72], yaw: 0.2, scale: 0.72 },
   { type: 'rock', n: [-0.25, -0.62, -0.74], yaw: 0.4, scale: 1.35 },
   { type: 'rock', n: [0.24, -0.64, -0.73], yaw: 2.2, scale: 1.25 },
@@ -3349,12 +3591,19 @@ function setCharacterBodyColor(character, color) {
 }
 
 function makeCharacter(bodyColor, headColor = 0xffe8cf, name = null, opts = {}) {
-  const { cap = true, pantsColor = 0x5a5f73 } = opts;
+  const {
+    cap = true,
+    pantsColor = 0x5a5f73,
+    handColor = headColor,
+    faceStyle = 'default',
+    handsVisible = true,
+  } = opts;
   const g = new THREE.Group();
   const bodyMat = toonMat(bodyColor);
   const trimMat = toonMat(characterTone(bodyColor, -0.13));
   const softMat = toonMat(characterTone(bodyColor, 0.14, -0.12));
   const skinMat = toonMat(headColor);
+  const handMat = toonMat(handColor);
   const pantsMat = toonMat(pantsColor);
   const shoeMat = toonMat(0x424957);
 
@@ -3410,28 +3659,37 @@ function makeCharacter(bodyColor, headColor = 0xffe8cf, name = null, opts = {}) 
   head.castShadow = true; addOutline(head);
   headRig.add(head);
   const eyeMat = toonMat(0x40394a);
-  [-0.07, 0.07].forEach(x => {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.029, 9, 7), eyeMat);
-    eye.position.set(x, 0.018, 0.204);
-    const glint = new THREE.Mesh(
-      new THREE.SphereGeometry(0.008, 6, 4),
-      new THREE.MeshBasicMaterial({ color: 0xfffbef }),
-    );
-    glint.position.set(-0.007, 0.009, 0.026);
-    eye.add(glint);
-    headRig.add(eye);
-  });
-  const cheekMat = toonMat(0xe9a49d);
-  [-0.128, 0.128].forEach(x => {
-    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.018, 7, 5), cheekMat);
-    cheek.scale.set(1.05, 0.56, 0.38);
-    cheek.position.set(x, -0.035, 0.196);
-    headRig.add(cheek);
-  });
-  const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.014, 7, 5), toonMat(0x9d6667));
-  mouth.scale.set(1.45, 0.34, 0.32);
-  mouth.position.set(0, -0.063, 0.209);
-  headRig.add(mouth);
+  if (faceStyle === 'closed') {
+    [-0.07, 0.07].forEach((x, index) => {
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.012, 0.014), eyeMat);
+      eye.position.set(x, 0.014, 0.218);
+      eye.rotation.z = (index ? -1 : 1) * 0.08;
+      headRig.add(eye);
+    });
+  } else if (faceStyle !== 'blank') {
+    [-0.07, 0.07].forEach(x => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.029, 9, 7), eyeMat);
+      eye.position.set(x, 0.018, 0.204);
+      const glint = new THREE.Mesh(
+        new THREE.SphereGeometry(0.008, 6, 4),
+        new THREE.MeshBasicMaterial({ color: 0xfffbef }),
+      );
+      glint.position.set(-0.007, 0.009, 0.026);
+      eye.add(glint);
+      headRig.add(eye);
+    });
+    const cheekMat = toonMat(0xe9a49d);
+    [-0.128, 0.128].forEach(x => {
+      const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.018, 7, 5), cheekMat);
+      cheek.scale.set(1.05, 0.56, 0.38);
+      cheek.position.set(x, -0.035, 0.196);
+      headRig.add(cheek);
+    });
+    const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.014, 7, 5), toonMat(0x9d6667));
+    mouth.scale.set(1.45, 0.34, 0.32);
+    mouth.position.set(0, -0.063, 0.209);
+    headRig.add(mouth);
+  }
 
   // A shallow cap keeps the top silhouette soft; the old tall dome looked like
   // a cone at close range and hid too much of the face.
@@ -3452,9 +3710,12 @@ function makeCharacter(bodyColor, headColor = 0xffe8cf, name = null, opts = {}) 
     pivot.position.set(x, 0.84, 0);                      // shoulder
     const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.20, 4, 8), bodyMat);
     arm.position.y = -0.145; arm.castShadow = true; addOutline(arm);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.062, 9, 7), skinMat);
-    hand.position.set(0, -0.292, 0.012); hand.castShadow = true;
-    pivot.add(arm, hand);
+    pivot.add(arm);
+    if (handsVisible) {
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.062, 9, 7), handMat);
+      hand.position.set(0, -0.292, 0.012); hand.castShadow = true;
+      pivot.add(hand);
+    }
     body.add(pivot);
     limbs[key] = pivot;
   });
@@ -3476,99 +3737,60 @@ function makeCharacter(bodyColor, headColor = 0xffe8cf, name = null, opts = {}) 
   return g;
 }
 
-// Jarvis's body — 미네르바의 기계 올빼미. A plump bronze automaton owl that
-// shares the same walk animator: wings map to the arm pivots (they flap),
-// stubby legs to the leg pivots. Same userData contract as makeCharacter.
-function makeOwlCharacter(color, name = null) {
+// Argos keeps a compact bronze owl vessel beside the star-warden body. It is a
+// companion prop, not Jarvis's body, and deliberately has no character rig.
+function makeBronzeOwlVessel(scale = 1) {
   const g = new THREE.Group();
-  const bodyMat = toonMat(color);
-  const darkMat = toonMat(characterTone(color, -0.16));
-  const brassMat = toonMat(0xd9ad62);
-  const body = new THREE.Group();
-  g.add(body);
-  g.userData.body = body;
-  g.userData.bodyMaterial = bodyMat;
-  g.userData.characterType = 'owl';
-  g.userData.labelHeight = 1.54;
-  g.userData.activityHeight = 1.40;
-
-  const contactShadow = makeCharacterContactShadow(0.4);
-  g.add(contactShadow);
-  g.userData.contactShadow = contactShadow;
-
-  // plump torso + cream belly patch
-  const torso = new THREE.Mesh(new THREE.SphereGeometry(0.34, 14, 12), bodyMat);
-  torso.scale.set(1, 1.15, 0.95); torso.position.y = 0.58;
-  torso.castShadow = true; addOutline(torso);
-  const tummy = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), toonMat(0xf3e6c8));
-  tummy.scale.set(0.85, 1.0, 0.55); tummy.position.set(0, 0.52, 0.16);
-  body.add(torso, tummy);
-
-  // Big glass eyes, highlights and brows keep the mechanical owl expressive.
-  [-0.115, 0.115].forEach(x => {
-    const ring = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), toonMat(0xfffbe8));
-    ring.position.set(x, 0.84, 0.24);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 6), toonMat(0x3a3344));
-    pupil.position.set(x, 0.84, 0.32);
-    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    glint.position.set(x - 0.012, 0.858, 0.363);
-    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.025, 0.035), darkMat);
-    brow.position.set(x, 0.955, 0.23);
-    brow.rotation.z = x < 0 ? -0.14 : 0.14;
-    body.add(ring, pupil, glint, brow);
+  const bronze = toonMat(0xa98258);
+  const violet = toonMat(0x4b3f72);
+  const gold = toonMat(0xf2cf70);
+  const dark = toonMat(0x29233f);
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.20, 12, 9), bronze);
+  body.scale.set(0.88, 1.18, 0.78);
+  body.position.y = 0.25;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 9), bronze);
+  head.scale.set(1.18, 0.92, 0.88);
+  head.position.y = 0.47;
+  [-0.19, 0.19].forEach((x, index) => {
+    const wing = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.24, 3, 7), violet);
+    wing.scale.set(0.62, 1, 0.48);
+    wing.position.set(x, 0.26, -0.01);
+    wing.rotation.z = (index ? -1 : 1) * 0.24;
+    const eyeMark = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.009, 5, 12), gold);
+    eyeMark.position.set(x, 0.27, 0.075);
+    const eyeCore = new THREE.Mesh(new THREE.SphereGeometry(0.016, 6, 5), dark);
+    eyeCore.position.set(x, 0.27, 0.084);
+    g.add(wing, eyeMark, eyeCore);
   });
-  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.14, 6), toonMat(0xe8b64f));
-  beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.73, 0.33);
-  body.add(beak);
-
-  // ear tufts — the Minerva silhouette
-  [-0.16, 0.16].forEach(x => {
-    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 6), bodyMat);
-    tuft.position.set(x, 1.0, 0);
-    tuft.castShadow = true;
-    body.add(tuft);
+  [-0.073, 0.073].forEach(x => {
+    const lens = new THREE.Mesh(new THREE.TorusGeometry(0.054, 0.015, 6, 14), gold);
+    lens.position.set(x, 0.49, 0.165);
+    const glass = new THREE.Mesh(new THREE.CircleGeometry(0.043, 12), dark);
+    glass.position.set(x, 0.49, 0.17);
+    g.add(lens, glass);
   });
-
-  // A tiny clock on the chest links Jarvis's operational role to the body,
-  // even while the status effect is not active.
-  const clockFace = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.095, 0.035, 16), toonMat(0xfff4d8));
-  clockFace.rotation.x = Math.PI / 2;
-  clockFace.position.set(0, 0.52, 0.30);
-  const clockRim = new THREE.Mesh(new THREE.TorusGeometry(0.10, 0.014, 6, 18), brassMat);
-  clockRim.position.set(0, 0.52, 0.322);
-  const clockHand = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.075, 0.018), darkMat);
-  clockHand.position.set(0.012, 0.545, 0.34);
-  clockHand.rotation.z = -0.45;
-  body.add(clockFace, clockRim, clockHand);
-
-  // wings on the arm pivots (the shared animator makes them flap while walking)
-  const limbs = {};
-  [['armL', -0.32], ['armR', 0.32]].forEach(([key, x]) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, 0.72, 0);
-    const wing = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.26, 4, 8), bodyMat);
-    wing.scale.set(0.55, 1, 1);
-    wing.position.y = -0.18; wing.castShadow = true; addOutline(wing);
-    pivot.add(wing);
-    body.add(pivot);
-    limbs[key] = pivot;
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.038, 0.10, 6), gold);
+  beak.rotation.x = Math.PI / 2;
+  beak.position.set(0, 0.43, 0.19);
+  [-0.13, 0.13].forEach(x => {
+    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.11, 6), bronze);
+    tuft.position.set(x, 0.64, 0);
+    g.add(tuft);
   });
-  // stubby automaton legs
-  [['legL', -0.11], ['legR', 0.11]].forEach(([key, x]) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, 0.24, 0);
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.2, 6), toonMat(0x8a6f4e));
-    leg.position.y = -0.1; leg.castShadow = true;
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), brassMat);
-    foot.scale.set(1.1, 0.48, 1.35);
-    foot.position.set(0, -0.21, 0.055);
-    pivot.add(leg, foot);
-    g.add(pivot);
-    limbs[key] = pivot;
+  const chestStars = [
+    [-0.055, 0.29], [0.035, 0.33], [0.068, 0.23], [-0.025, 0.18],
+  ];
+  for (const [x, y] of chestStars) {
+    const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.018, 0), gold);
+    star.position.set(x, y, 0.17);
+    g.add(star);
+  }
+  [body, head, beak].forEach((mesh) => {
+    mesh.castShadow = true;
+    addOutline(mesh, 1.035);
+    g.add(mesh);
   });
-  g.userData.limbs = limbs;
-
-  if (name) g.userData.labelText = name;
+  g.scale.setScalar(scale);
   return g;
 }
 
@@ -3584,71 +3806,146 @@ function addAgentAccessories(c, visual = {}) {
   const style = typeof visual.style === 'string' ? visual.style : '';
   c.userData.visualStyle = style;
 
-  if (style === 'companion-conductor') {
-    // 동료형 조율자: 짧은 코트와 별실을 잇는 띠, 작은 소리굽쇠.
-    const baton = new THREE.Group();
-    const metal = toonMat(0xf7f3ff);
-    const gold = new THREE.MeshBasicMaterial({ color: 0xffe19a });
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.021, 0.28, 7), metal);
+  const addHairDome = (color, { back = true } = {}) => {
+    if (!headRig) return null;
+    const hairMat = toonMat(color);
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.226, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.53),
+      hairMat,
+    );
+    dome.position.y = 0.025;
+    dome.castShadow = true;
+    headRig.add(dome);
+    if (back) {
+      const backHair = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.20, 3, 8), hairMat);
+      backHair.position.set(0, -0.12, -0.15);
+      backHair.castShadow = true;
+      headRig.add(backHair);
+    }
+    return hairMat;
+  };
+
+  const makeTuningFork = ({ repair = true, scale = 1 } = {}) => {
+    const fork = new THREE.Group();
+    const silver = toonMat(0xd9dee7);
+    const gold = toonMat(0xf2cf70);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.021, 0.28, 7), silver);
     handle.position.y = -0.04;
-    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.025, 0.025), metal);
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.025, 0.025), silver);
     bridge.position.y = 0.10;
-    baton.add(handle, bridge);
+    fork.add(handle, bridge);
     [-0.046, 0.046].forEach(x => {
-      const tine = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 7), metal);
-      tine.position.set(x, 0.17, 0);
-      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.018, 7, 5), gold);
-      tip.position.set(x, 0.245, 0);
-      baton.add(tine, tip);
+      const tine = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.15, 7), silver);
+      tine.position.set(x, 0.175, 0);
+      fork.add(tine);
     });
+    if (repair) {
+      const repairBand = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.008, 5, 10), gold);
+      repairBand.rotation.x = Math.PI / 2;
+      repairBand.position.set(0, 0.015, 0);
+      fork.add(repairBand);
+    }
+    fork.scale.setScalar(scale);
+    return fork;
+  };
+
+  if (style === 'companion-conductor') {
+    // Midnight constellation coat, Polaris pins and gold-mended baton.
+    addHairDome(0x172033);
+    const baton = makeTuningFork({ repair: true, scale: 1.08 });
     baton.position.set(0, -0.31, 0.08);
     baton.rotation.x = -0.58;
     baton.rotation.z = -0.10;
     L.armR.add(baton);
-    const coatMat = c.userData.trimMaterial || toonMat(0xc6a84e);
+    const coatMat = c.userData.trimMaterial || toonMat(0x151d31);
     [-0.095, 0.095].forEach((x, index) => {
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.27, 0.045), coatMat);
-      tail.position.set(x, 0.47, -0.10);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.43, 0.05), coatMat);
+      tail.position.set(x, 0.38, -0.10);
       tail.rotation.z = (index ? -1 : 1) * 0.08;
       body.add(tail);
     });
-    const sash = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.42, 0.026), toonMat(0xf3e2a4));
+    const sash = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.43, 0.026), toonMat(0x7f8ca8));
     sash.position.set(0, 0.70, 0.225);
     sash.rotation.z = -0.42;
     body.add(sash);
-    const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), gold);
-    star.scale.set(0.9, 1.35, 0.7);
-    star.position.set(-0.105, 0.77, 0.255);
-    body.add(star);
-    c.userData.labelHeight = 1.62;
-    c.userData.activityHeight = 1.52;
-  } else if (style === 'clockwork-owl') {
-    // 운영 비서: 작은 정장 모자. 시계는 몸체에 내장되어 있어 소품을
-    // 추가로 늘리지 않고도 정체성이 두 겹으로 읽힌다.
-    const hat = new THREE.Group();
-    const hatMat = toonMat(0x485768);
-    const bandMat = toonMat(0xd6b46e);
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.032, 14), hatMat);
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.125, 0.17, 12), hatMat);
-    crown.position.y = 0.09;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.128, 0.128, 0.035, 12), bandMat);
-    band.position.y = 0.035;
-    hat.add(brim, crown, band);
-    hat.position.set(0, 1.06, -0.015);
-    hat.rotation.z = -0.06;
-    body.add(hat);
-    const keyStem = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.18, 6), bandMat);
-    keyStem.rotation.z = Math.PI / 2;
-    keyStem.position.set(-0.30, 0.58, -0.08);
-    const keyLoop = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.014, 6, 12), bandMat);
-    keyLoop.rotation.y = Math.PI / 2;
-    keyLoop.position.set(-0.40, 0.58, -0.08);
-    body.add(keyStem, keyLoop);
-    c.userData.labelHeight = 1.58;
-    c.userData.activityHeight = 1.43;
+    const polaris = new THREE.Mesh(new THREE.OctahedronGeometry(0.047, 0), toonMat(0xffd76b));
+    polaris.scale.set(0.9, 1.35, 0.7);
+    polaris.position.set(-0.105, 0.77, 0.255);
+    body.add(polaris);
+    [[-0.06, 0.69], [0.05, 0.62], [0.11, 0.72]].forEach(([x, y]) => {
+      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.018, 0), toonMat(0xb9c5e3));
+      star.position.set(x, y, 0.245);
+      body.add(star);
+    });
+    c.userData.labelHeight = 1.68;
+    c.userData.activityHeight = 1.56;
+  } else if (style === 'clockwork-steward') {
+    // Human-shaped butler automaton: lunar lenses, chronicle crest and watch.
+    const brass = toonMat(0xd1a45f);
+    const glass = new THREE.MeshBasicMaterial({ color: 0x8fcbff });
+    const white = toonMat(0xf4f2e8);
+    [-0.075, 0.075].forEach(x => {
+      const lens = new THREE.Mesh(new THREE.TorusGeometry(0.059, 0.014, 6, 16), brass);
+      lens.position.set(x, 0.018, 0.221);
+      const lensGlass = new THREE.Mesh(new THREE.CircleGeometry(0.047, 14), glass);
+      lensGlass.position.set(x, 0.018, 0.225);
+      headRig?.add(lens, lensGlass);
+    });
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.022, 0.018), toonMat(0x72583d));
+    brow.position.set(0, 0.105, 0.195);
+    headRig?.add(brow);
+
+    [-0.11, 0.11].forEach((x, index) => {
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.05), c.userData.trimMaterial);
+      tail.position.set(x, 0.38, -0.10);
+      tail.rotation.z = (index ? -1 : 1) * 0.07;
+      body.add(tail);
+    });
+    const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.24, 0.025), white);
+    shirt.position.set(0, 0.70, 0.225);
+    const bow = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), toonMat(0x35414d));
+    bow.scale.set(1.55, 0.70, 0.55);
+    bow.position.set(0, 0.80, 0.25);
+    body.add(shirt, bow);
+
+    const crest = new THREE.Group();
+    [0.095, 0.068, 0.040].forEach((radius, index) => {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.009, 5, 18), index === 0 ? brass : glass);
+      crest.add(ring);
+    });
+    const hour = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.066, 0.012), toonMat(0x27394a));
+    hour.position.y = 0.025;
+    const minute = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.082, 0.012), toonMat(0x27394a));
+    minute.position.set(0.025, 0.025, 0);
+    minute.rotation.z = -0.62;
+    crest.add(hour, minute);
+    crest.position.set(0, 0.62, 0.247);
+    body.add(crest);
+
+    const watch = new THREE.Group();
+    const watchFace = new THREE.Mesh(new THREE.CircleGeometry(0.055, 14), white);
+    const watchRim = new THREE.Mesh(new THREE.TorusGeometry(0.061, 0.012, 6, 16), brass);
+    watch.add(watchFace, watchRim);
+    watch.position.set(0.20, 0.54, 0.238);
+    body.add(watch);
+    for (let index = 0; index < 4; index++) {
+      const link = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.005, 5, 10), brass);
+      link.position.set(0.12 + index * 0.025, 0.69 - index * 0.045, 0.245);
+      body.add(link);
+    }
+    const memoryRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.19, 0.012, 6, 24),
+      new THREE.MeshBasicMaterial({ color: 0x8fcbff, transparent: true, opacity: 0.48 }),
+    );
+    memoryRing.position.set(-0.24, 0.92, -0.02);
+    memoryRing.rotation.set(0.55, 0.25, 0.35);
+    body.add(memoryRing);
+    c.userData.labelHeight = 1.72;
+    c.userData.activityHeight = 1.58;
   } else if (style === 'moonlight-scholar') {
-    // 달빛의 공명학자: 둥근 안경 + 펼친 검증 노트.
-    const glassMat = toonMat(0x4a4458);
+    // Gray-haired scholar with silver glasses and a locked research book.
+    addHairDome(0x8a8f9b);
+    const glassMat = toonMat(0xc9ced8);
     [-0.07, 0.07].forEach(x => {
       const rim = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.011, 6, 16), glassMat);
       rim.position.set(x, 0.018, 0.218);
@@ -3660,20 +3957,19 @@ function addAgentAccessories(c, visual = {}) {
     const book = new THREE.Group();
     const coverMat = toonMat(0x6f5747);
     const pageMat = toonMat(0xf4efe2);
-    [-1, 1].forEach(side => {
-      const cover = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.025, 0.19), coverMat);
-      const pages = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.018, 0.18), pageMat);
-      cover.position.x = side * 0.052;
-      pages.position.set(side * 0.052, 0.016, 0);
-      cover.rotation.z = side * -0.12;
-      pages.rotation.z = side * -0.12;
-      book.add(cover, pages);
+    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.055, 0.26), coverMat);
+    const pages = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.045, 0.235), pageMat);
+    pages.position.y = 0.035;
+    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.042, 0.025), toonMat(0xc9a35f));
+    lock.position.set(0, 0.065, 0.13);
+    book.add(cover, pages, lock);
+    [0xe07a7a, 0x778fbd, 0xd8bd67].forEach((color, index) => {
+      const mark = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.012, 0.10), toonMat(color));
+      mark.position.set(-0.06 + index * 0.06, 0.068, -0.13);
+      book.add(mark);
     });
-    const spine = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.19, 6), coverMat);
-    spine.rotation.x = Math.PI / 2;
-    book.add(spine);
-    book.position.set(0, -0.30, 0.10);
-    book.rotation.x = -0.78;
+    book.position.set(0, -0.31, 0.09);
+    book.rotation.x = -0.62;
     L.armL.add(book);
     const scholarMat = c.userData.trimMaterial || toonMat(0x6c688f);
     [-0.10, 0.10].forEach((x, index) => {
@@ -3682,14 +3978,45 @@ function addAgentAccessories(c, visual = {}) {
       panel.rotation.z = (index ? -1 : 1) * 0.055;
       body.add(panel);
     });
-    const moonPin = new THREE.Mesh(new THREE.OctahedronGeometry(0.038, 0), new THREE.MeshBasicMaterial({ color: 0xe6e5ff }));
-    moonPin.scale.y = 1.35;
-    moonPin.position.set(-0.11, 0.77, 0.25);
-    body.add(moonPin);
-    c.userData.labelHeight = 1.63;
-    c.userData.activityHeight = 1.50;
+    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.035, 6, 18), toonMat(0x9aa1b2));
+    scarf.rotation.x = Math.PI / 2;
+    scarf.position.y = 0.85;
+    const crescent = new THREE.Mesh(new THREE.TorusGeometry(0.038, 0.012, 5, 14, Math.PI * 1.55), toonMat(0xd5d9f2));
+    crescent.position.set(-0.09, 0.73, 0.25);
+    crescent.rotation.z = -0.35;
+    body.add(scarf, crescent);
+    const ink = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 5), toonMat(0x3c4058));
+    ink.position.set(0.025, -0.33, 0.052);
+    L.armR.add(ink);
+    c.userData.labelHeight = 1.70;
+    c.userData.activityHeight = 1.56;
   } else if (style === 'forest-atelier') {
-    // 별을 그리는 숲의 요정: 붓 + 다섯 장 꽃 배지.
+    // Small forest fairy: red twin braids, straw hat, brush and scent bottles.
+    const hairMat = addHairDome(0xb93a3f, { back: false });
+    [-0.18, 0.18].forEach((x, index) => {
+      const braid = new THREE.Mesh(new THREE.CapsuleGeometry(0.043, 0.22, 3, 8), hairMat);
+      braid.position.set(x, -0.13, -0.01);
+      braid.rotation.z = (index ? -1 : 1) * 0.08;
+      headRig?.add(braid);
+      const ear = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.13, 7), toonMat(0xf4d8c5));
+      ear.position.set(index ? 0.23 : -0.23, -0.005, 0);
+      ear.rotation.z = (index ? -1 : 1) * Math.PI / 2;
+      headRig?.add(ear);
+    });
+    [-0.10, -0.06, 0.06, 0.10].forEach((x, index) => {
+      const freckle = new THREE.Mesh(new THREE.SphereGeometry(0.006, 5, 4), toonMat(0xb97868));
+      freckle.position.set(x, -0.025 - (index % 2) * 0.008, 0.222);
+      headRig?.add(freckle);
+    });
+    const straw = toonMat(0xd8bd78);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.035, 16), straw);
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.15, 14), straw);
+    brim.position.y = 0.18;
+    crown.position.y = 0.27;
+    const ribbon = new THREE.Mesh(new THREE.TorusGeometry(0.185, 0.018, 6, 18), toonMat(0x8faf8f));
+    ribbon.rotation.x = Math.PI / 2;
+    ribbon.position.y = 0.225;
+    headRig?.add(brim, crown, ribbon);
     const brush = new THREE.Group();
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.34, 6), toonMat(0xc9a87c));
     const bristle = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 8), toonMat(0xd91f4e));
@@ -3698,20 +4025,6 @@ function addAgentAccessories(c, visual = {}) {
     brush.position.set(0, -0.36, 0.06);
     brush.rotation.x = -0.5;
     L.armR.add(brush);
-    const flower = new THREE.Group();
-    const petalMat = toonMat(0xffb3c6);
-    for (let i = 0; i < 5; i++) {
-      const angle = i / 5 * Math.PI * 2;
-      const petal = new THREE.Mesh(new THREE.SphereGeometry(0.028, 7, 5), petalMat);
-      petal.scale.set(0.72, 1.3, 0.55);
-      petal.position.set(Math.cos(angle) * 0.04, Math.sin(angle) * 0.04, 0);
-      petal.rotation.z = angle - Math.PI / 2;
-      flower.add(petal);
-    }
-    flower.add(new THREE.Mesh(new THREE.SphereGeometry(0.022, 7, 5), toonMat(0xffe19a)));
-    flower.position.set(0.11, 0.255, 0.075);
-    flower.rotation.x = -0.35;
-    headRig?.add(flower);
     const apron = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.22, 0.026), toonMat(0xf8ded8));
     apron.position.set(0, 0.64, 0.224);
     const skirt = new THREE.Mesh(
@@ -3725,102 +4038,99 @@ function addAgentAccessories(c, visual = {}) {
     strap.position.set(-0.10, 0.72, 0.20);
     strap.rotation.z = -0.48;
     body.add(skirt, apron, satchel, strap);
-    c.userData.labelHeight = 1.64;
-    c.userData.activityHeight = 1.50;
-  } else if (style === 'resonance-engineer') {
-    // 공명공학자: 머리 수신기 + 안테나 + 가슴 콘솔 + 렌치.
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 6), toonMat(0x59636d));
-    mast.position.set(0, 0.25, 0);
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 6), new THREE.MeshBasicMaterial({ color: 0x9fe8ff }));
-    beacon.position.set(0, 0.33, 0);
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.07, 0.01, 6, 16),
-      new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.7 })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, 0.33, 0);
-    headRig?.add(mast, beacon, ring);
-    [-0.225, 0.225].forEach(x => {
-      const receiver = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.045, 10), toonMat(0x3f6671));
-      receiver.rotation.z = Math.PI / 2;
-      receiver.position.set(x, 0.01, 0.015);
-      headRig?.add(receiver);
+    [0x8db9a4, 0xd6a2bd, 0xe8c66e].forEach((color, index) => {
+      const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.023, 0.09, 7), toonMat(color));
+      bottle.position.set(-0.17 + index * 0.055, 0.54, 0.245);
+      body.add(bottle);
     });
-    const console_ = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.11, 0.045), toonMat(0x3b4550));
-    console_.position.set(0, 0.72, 0.2);
-    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.045, 0.012), new THREE.MeshBasicMaterial({ color: 0x9fe8ff }));
-    screen.position.set(0, 0.73, 0.23);
-    const utilityBelt = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.025, 6, 16), toonMat(0x425962));
-    utilityBelt.rotation.x = Math.PI / 2;
-    utilityBelt.position.set(0, 0.52, 0);
-    const signalCoil = new THREE.Mesh(
-      new THREE.TorusGeometry(0.075, 0.016, 6, 16),
-      new THREE.MeshBasicMaterial({ color: 0x9fe8ff }),
-    );
-    signalCoil.rotation.y = Math.PI / 2;
-    signalCoil.position.set(-0.22, 0.57, 0.02);
-    body.add(console_, screen, utilityBelt, signalCoil);
-    const wrench = new THREE.Group();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.3, 6), toonMat(0x8b95a3));
-    const jaw = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.016, 6, 12, Math.PI * 1.4), toonMat(0x8b95a3));
-    jaw.position.y = 0.17;
-    wrench.add(shaft, jaw);
-    wrench.position.set(0, -0.36, 0.06);
-    wrench.rotation.x = -0.55;
-    L.armR.add(wrench);
-    c.userData.labelHeight = 1.68;
-    c.userData.activityHeight = 1.55;
-  } else if (style === 'quiet-field-observer') {
-    // 조용한 현장 관측자: 위압적인 눈 지팡이 대신 짧은 여행 망토,
-    // 접이식 필드 스코프와 출처 노트를 든다.
-    const cloakMat = c.userData.trimMaterial || toonMat(0x5d587c);
-    const cloak = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.47, 0.045), cloakMat);
-    cloak.position.set(0, 0.66, -0.205);
-    cloak.rotation.x = -0.08;
-    const cloakHem = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.27, 0.16, 10), cloakMat);
-    cloakHem.position.set(0, 0.44, -0.11);
-    const clasp = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.037, 0),
-      new THREE.MeshBasicMaterial({ color: 0xd9d2ff }),
-    );
-    clasp.position.set(0, 0.80, 0.235);
-    body.add(cloak, cloakHem, clasp);
-
-    const fieldScope = new THREE.Group();
-    const scopeMat = toonMat(0x4c5266);
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.047, 0.29, 9), scopeMat);
-    const lensRim = new THREE.Mesh(new THREE.TorusGeometry(0.049, 0.012, 6, 14), toonMat(0xc7b77a));
-    lensRim.rotation.x = Math.PI / 2;
-    lensRim.position.y = 0.15;
-    const lensGlass = new THREE.Mesh(
-      new THREE.CircleGeometry(0.038, 12),
-      new THREE.MeshBasicMaterial({ color: 0xbfd9ec, transparent: true, opacity: 0.72, side: THREE.DoubleSide }),
-    );
-    lensGlass.rotation.x = -Math.PI / 2;
-    lensGlass.position.y = 0.157;
-    fieldScope.add(tube, lensRim, lensGlass);
-    fieldScope.position.set(0, -0.31, 0.09);
-    fieldScope.rotation.x = -0.62;
-    fieldScope.rotation.z = 0.18;
-    L.armL.add(fieldScope);
-
-    const notebook = new THREE.Group();
-    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.18, 0.035), toonMat(0x8d765f));
-    const page = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.15, 0.014), toonMat(0xf2ecdd));
-    page.position.z = 0.024;
-    notebook.add(cover, page);
-    notebook.position.set(0, -0.30, 0.075);
-    notebook.rotation.x = -0.42;
-    L.armR.add(notebook);
-
-    const satchel = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.075), toonMat(0x806b58));
-    satchel.position.set(0.24, 0.55, 0.02);
-    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.40, 0.018), toonMat(0x806b58));
-    strap.position.set(0.10, 0.71, 0.20);
-    strap.rotation.z = 0.46;
-    body.add(satchel, strap);
-    c.userData.labelHeight = 1.62;
-    c.userData.activityHeight = 1.50;
+    c.userData.labelHeight = 1.72;
+    c.userData.activityHeight = 1.58;
+  } else if (style === 'resonance-listener') {
+    // Last resonant: low-tied black hair, ear crystals and repaired tuning fork.
+    const hairMat = addHairDome(0x17191f);
+    const ponytail = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.28, 3, 8), hairMat);
+    ponytail.position.set(0, -0.20, -0.20);
+    ponytail.rotation.x = -0.10;
+    headRig?.add(ponytail);
+    const crystalMat = new THREE.MeshToonMaterial({
+      color: 0x63e0d4,
+      emissive: 0x1c4f5a,
+      emissiveIntensity: 0.45,
+      gradientMap: TOON_GRAD,
+    });
+    [-1, 1].forEach(side => {
+      for (let index = 0; index < 3; index++) {
+        const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.035 - index * 0.005, 0), crystalMat);
+        crystal.scale.y = 1.45;
+        crystal.position.set(side * (0.215 + index * 0.025), 0.045 - index * 0.055, -0.005);
+        crystal.rotation.z = side * (0.42 + index * 0.15);
+        headRig?.add(crystal);
+      }
+      const irisRune = new THREE.Mesh(new THREE.TorusGeometry(0.038, 0.006, 5, 14), crystalMat);
+      irisRune.position.set(side * 0.07, 0.018, 0.223);
+      headRig?.add(irisRune);
+    });
+    [-0.105, 0.105].forEach((x, index) => {
+      const robePanel = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.43, 0.048), c.userData.trimMaterial);
+      robePanel.position.set(x, 0.38, -0.085);
+      robePanel.rotation.z = (index ? -1 : 1) * 0.045;
+      body.add(robePanel);
+    });
+    const collar = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.055, 0.03), toonMat(0xd7e3df));
+    collar.position.set(0, 0.81, 0.22);
+    body.add(collar);
+    const fork = makeTuningFork({ repair: true, scale: 1.0 });
+    fork.position.set(0, -0.32, 0.07);
+    fork.rotation.x = -0.58;
+    L.armR.add(fork);
+    const pendant = makeTuningFork({ repair: true, scale: 0.34 });
+    pendant.position.set(0, 0.72, 0.245);
+    pendant.rotation.z = Math.PI;
+    body.add(pendant);
+    c.userData.labelHeight = 1.70;
+    c.userData.activityHeight = 1.57;
+  } else if (style === 'star-warden-observer') {
+    // Tall star-warden body with hidden hands, floating eyes and owl vessel.
+    const robeMat = c.userData.trimMaterial || toonMat(0x342d54);
+    const hood = new THREE.Mesh(new THREE.TorusGeometry(0.235, 0.062, 7, 20), robeMat);
+    hood.position.set(0, 0.01, 0.005);
+    headRig?.add(hood);
+    const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.31, 0.66, 12), robeMat);
+    robe.position.y = 0.48;
+    const cloak = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.62, 0.055), robeMat);
+    cloak.position.set(0, 0.53, -0.21);
+    cloak.rotation.x = -0.06;
+    body.add(robe, cloak);
+    [L.armL, L.armR].forEach((arm, index) => {
+      const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.28, 4, 8), robeMat);
+      sleeve.position.set(0, -0.17, 0.005);
+      sleeve.scale.set(1.15, 1.15, 1.05);
+      arm.add(sleeve);
+      arm.rotation.z = (index ? -1 : 1) * 0.38;
+    });
+    const starMat = toonMat(0xd7cee9);
+    [[-0.14, 0.72], [0.09, 0.63], [-0.04, 0.51], [0.15, 0.42], [-0.10, 0.32]].forEach(([x, y], index) => {
+      const star = new THREE.Mesh(new THREE.OctahedronGeometry(index === 0 ? 0.024 : 0.015, 0), starMat);
+      star.position.set(x, y, 0.245);
+      body.add(star);
+    });
+    const eyeGold = toonMat(0xf2cf70);
+    [[-0.34, 1.05, -0.03], [0.34, 0.92, 0.01], [0.28, 1.25, -0.06]].forEach(([x, y, z], index) => {
+      const eye = new THREE.Group();
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.060 - index * 0.006, 0.012, 6, 16), eyeGold);
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.024, 7, 5), toonMat(0x29233f));
+      core.position.z = 0.012;
+      eye.add(rim, core);
+      eye.position.set(x, y, z);
+      body.add(eye);
+    });
+    const owl = makeBronzeOwlVessel(0.68);
+    owl.position.set(0.34, 0.38, 0.08);
+    owl.rotation.y = -0.22;
+    body.add(owl);
+    c.userData.lockedSleeves = true;
+    c.userData.labelHeight = 1.82;
+    c.userData.activityHeight = 1.68;
   }
 }
 
@@ -3830,15 +4140,22 @@ function animateCharacterWalk(char, move01, t) {
   const L = char.userData.limbs;
   if (!L) return;
   const swing = Math.sin(t * 8.5) * 0.58 * move01;
-  L.armL.rotation.x = swing;
-  L.armR.rotation.x = -swing;
   L.legL.rotation.x = -swing * 0.92;
   L.legR.rotation.x = swing * 0.92;
   const rest = 1 - move01;
   const breath = Math.sin(t * 1.55);
   const idle = rest * (0.035 + breath * 0.022);
-  L.armL.rotation.z = 0.08 + idle;
-  L.armR.rotation.z = -0.08 - idle;
+  if (char.userData.lockedSleeves) {
+    L.armL.rotation.x = 0.10 + Math.sin(t * 0.7) * 0.012;
+    L.armR.rotation.x = 0.10 - Math.sin(t * 0.7) * 0.012;
+    L.armL.rotation.z = 0.38 + idle * 0.2;
+    L.armR.rotation.z = -0.38 - idle * 0.2;
+  } else {
+    L.armL.rotation.x = swing;
+    L.armR.rotation.x = -swing;
+    L.armL.rotation.z = 0.08 + idle;
+    L.armR.rotation.z = -0.08 - idle;
+  }
 
   const body = char.userData.body;
   if (body) {
@@ -4092,14 +4409,26 @@ const npcs = [];
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));     // golden angle
 const N = AGENTS.length;
 AGENTS.forEach((d, i) => {
-  // `character` comes from config: 'owl' (Jarvis) or a little resonator person
-  // with signature props (baton/glasses/brush/antenna…) for a distinct silhouette
-  const c = d.character === 'owl'
-    ? makeOwlCharacter(d.color, d.name)
-    : makeCharacter(d.color, 0xffe8cf, d.name, {
-        cap: d.visual.cap !== false,
-        pantsColor: configHex(d.visual.pantsColor, 0x5a5f73),
-      });
+  // Every roster member keeps the shared walk/status contract. Config selects
+  // the face and hand treatment; accessories establish the canonical silhouette.
+  const skinColor = configHex(d.visual.skinColor, 0xffe8cf);
+  const baseOptions = {
+    cap: d.visual.cap !== false,
+    pantsColor: configHex(d.visual.pantsColor, 0x5a5f73),
+  };
+  if (d.character === 'automaton') {
+    Object.assign(baseOptions, {
+      handColor: 0xf4f2e8,
+      faceStyle: 'blank',
+    });
+  } else if (d.character === 'star-warden') {
+    Object.assign(baseOptions, {
+      faceStyle: 'closed',
+      handsVisible: false,
+    });
+  }
+  const c = makeCharacter(d.color, skinColor, d.name, baseOptions);
+  c.userData.characterType = d.character || 'person';
   addAgentAccessories(c, d.visual);
   addAgentActivitySignal(c, d.color, d.activityStyle);
   c.userData.agent = d;                          // dashboard record for the status card
@@ -4385,9 +4714,11 @@ addEventListener('pointermove', e => {
 });
 
 // ---- zoom: mouse wheel + two-finger pinch ----
-const ZOOM_MIN = 4, ZOOM_MAX = 26;
+const ZOOM_MIN = 4, ZOOM_MAX = 30;
+const DESKTOP_CINEMATIC_CAM_DIST = 26;
 const DASHBOARD_CAM_DIST = 18.8;
-const MOBILE_DASHBOARD_CAM_DIST = 23.8;
+const MOBILE_DASHBOARD_CAM_DIST = 27.0;
+const MOBILE_INTRO_CAM_DIST = 29.5;
 const EXPLORE_CAM_DIST = 10.5;
 const DASHBOARD_CAM_PITCH = 0.82;
 const EXPLORE_CAM_PITCH = 0.50;
@@ -4396,6 +4727,10 @@ let experienceMode = 'dashboard';
 
 function dashboardCameraDistance() {
   return innerWidth <= 520 ? MOBILE_DASHBOARD_CAM_DIST : DASHBOARD_CAM_DIST;
+}
+
+function introCameraDistance() {
+  return innerWidth <= 520 ? MOBILE_INTRO_CAM_DIST : dashboardCameraDistance();
 }
 
 function dashboardLookHeight() {
@@ -4420,7 +4755,7 @@ function startCameraIntro() {
   cameraIntro = {
     startedAt: performance.now(),
     duration: 2500,
-    fromDist: ZOOM_MAX,
+    fromDist: innerWidth <= 520 ? MOBILE_INTRO_CAM_DIST : DESKTOP_CINEMATIC_CAM_DIST,
     toDist: experienceMode === 'dashboard' ? dashboardCameraDistance() : EXPLORE_CAM_DIST,
     fromPitch: 0.9,
     toPitch: experienceMode === 'dashboard' ? DASHBOARD_CAM_PITCH : EXPLORE_CAM_PITCH,
@@ -5753,7 +6088,11 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   performanceGovernor.resize(innerWidth, innerHeight);
-  if (experienceMode === 'dashboard' && !cameraIntro) camDist = dashboardCameraDistance();
+  if (experienceMode === 'dashboard' && !cameraIntro) {
+    camDist = document.body.classList.contains('intro-active')
+      ? introCameraDistance()
+      : dashboardCameraDistance();
+  }
 });
 
 // kick off — start the render loop immediately so the intro shows a live world behind it,
@@ -5811,7 +6150,7 @@ introExploreBtn?.addEventListener('click', () => beginGame('explore'));
 document.getElementById('dashboardModeBtn')?.addEventListener('click', () => setExperienceMode('dashboard'));
 document.getElementById('exploreModeSwitchBtn')?.addEventListener('click', () => setExperienceMode('explore'));
 setExperienceMode('dashboard');
-camDist = dashboardCameraDistance();
+camDist = introCameraDistance();
 camPitch = DASHBOARD_CAM_PITCH;
 snapFollowCamera();
 addEventListener('keydown', anyKeyStart);
@@ -7539,6 +7878,21 @@ if (URL_PARAMS.has('dev')) {
         childMeshes: agent.npc?.getObjectsByProperty('isMesh', true).length || 0,
       }));
     },
+    mobilityState() {
+      return AGENTS.map((agent) => {
+        const dir = agent.npc?.userData?.dir;
+        const clearance = dir ? surfaceColliderClearance(dir) : null;
+        return {
+          key: agent.key,
+          blocked: dir ? isBlockedSurfaceDir(dir) : null,
+          inWater: dir ? isInWaterDir(dir) : null,
+          clearance: Number.isFinite(clearance) ? +(clearance * R).toFixed(3) : null,
+          stuckFor: +(agent.npc?.userData?.stuckTime || 0).toFixed(3),
+          homeDistance: dir && agent.home?.dir ? +(dir.angleTo(agent.home.dir) * R).toFixed(3) : null,
+          workDistance: dir && agent.workDir ? +(dir.angleTo(agent.workDir) * R).toFixed(3) : null,
+        };
+      });
+    },
     setAgentState(key, state, task = '') {
       const agent = AGENTS.find((item) => item.key === key);
       if (!agent) return null;
@@ -7727,6 +8081,7 @@ if (URL_PARAMS.has('dev')) {
       const homes = window.devPlanet.testAllHomes();
       document.documentElement.dataset.qaHomes = JSON.stringify(homes);
       document.documentElement.dataset.qaCharacters = JSON.stringify(window.devPlanet.characters());
+      document.documentElement.dataset.qaLayout = JSON.stringify(window.devPlanet.layoutAudit());
       document.documentElement.dataset.qaReady = homes.every((item) => item.ok) ? 'pass' : 'fail';
     });
   }
@@ -7762,6 +8117,7 @@ if (URL_PARAMS.has('dev')) {
     document.body.dataset.cameraVerification = JSON.stringify(window.devPlanet.cameraState());
     document.body.dataset.labelVerification = JSON.stringify(window.devPlanet.labelState());
     document.body.dataset.resultVerification = JSON.stringify(window.devPlanet.resultSpaces());
+    document.body.dataset.mobilityVerification = JSON.stringify(window.devPlanet.mobilityState());
   };
   syncDevDayState();
   const queueDevStateSync = () => {

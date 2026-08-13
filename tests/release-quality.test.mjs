@@ -68,6 +68,51 @@ test('layout audit detects duplicate ownership and close colliders', () => {
   assert.equal(audit.overlaps.length, 1);
 });
 
+test('layout audit compares angular collider radii in surface units', () => {
+  const audit = auditLayout({
+    entries: [
+      { type: 'cottage', ownerKey: 'rodi', n: [0, 0, 1], radius: 0.25 },
+      { type: 'tree', n: [0.30, 0, 0.954], radius: 0.25 },
+      { type: 'opsBeacon', n: [0, 1, 0], radius: 0.01 },
+    ],
+    expectedOwners: ['rodi'],
+  });
+  assert.equal(audit.overlaps.length, 1);
+  assert.ok(audit.overlaps[0].required > 2.5);
+});
+
+test('layout audit warns when distinct homes lack camera breathing room', () => {
+  const audit = auditLayout({
+    entries: [
+      { type: 'cottage', ownerKey: 'rodi', n: [0, 0, 1], radius: 0 },
+      { type: 'cottage', ownerKey: 'jarvis', n: [0.2, 0, 0.98], radius: 0 },
+      { type: 'opsBeacon', n: [0, 1, 0], radius: 0.1 },
+    ],
+    expectedOwners: ['rodi', 'jarvis'],
+  });
+  assert.equal(audit.status, 'review');
+  assert.equal(audit.homeClearance.length, 1);
+  assert.ok(audit.warnings.some((message) => message.includes('시야 여백')));
+});
+
+test('layout audit warns when a prop blocks a home approach', () => {
+  const audit = auditLayout({
+    entries: [
+      {
+        type: 'cottage', ownerKey: 'rodi', n: [0, 0, 1], radius: 0.2,
+        doorN: [0.18, 0, 0.984], approachN: [0.38, 0, 0.925],
+      },
+      { type: 'tree', n: [0.30, 0, 0.954], radius: 0.08 },
+      { type: 'opsBeacon', n: [0, 1, 0], radius: 0.01 },
+    ],
+    expectedOwners: ['rodi'],
+  });
+  assert.equal(audit.status, 'review');
+  assert.equal(audit.doorObstructions.length, 1);
+  assert.equal(audit.doorObstructions[0].owner, 'rodi');
+  assert.ok(audit.warnings.some((message) => message.includes('진입로')));
+});
+
 test('complete separated layout is release-ready', () => {
   const audit = auditLayout({
     entries: [

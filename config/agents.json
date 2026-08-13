@@ -3,7 +3,7 @@
   "_필드": {
     "key": "고유 id — agent-status.json·services.json·Hermes bridge와 연결되는 키",
     "color": "정체성 색 (#rrggbb) — 캐릭터·깃발·팀 바·카드에 모두 적용",
-    "character": "'person'(기본) 또는 'owl' — 3D 실루엣 종류",
+    "character": "'person'(기본), 'automaton', 'star-warden' — 3D 몸 형태",
     "role": "공개용 실제 역할",
     "operationalRoleKey": "Hermes bridge와 UI에서 사용할 안정적인 역할 enum",
     "identitySummary": "SOUL.md에서 공개 가능한 한두 문장 정체성 요약",
@@ -66,7 +66,7 @@
       "name": "Rodi",
       "kor": "로디",
       "emoji": "🎼",
-      "color": "#ffd76b",
+      "color": "#1F2A44",
       "character": "person",
       "role": "메인 오케스트레이터",
       "operationalRoleKey": "orchestrator",
@@ -93,11 +93,13 @@
       "visual": {
         "style": "companion-conductor",
         "cap": false,
-        "pantsColor": "#596477",
+        "skinColor": "#F2D7C2",
+        "pantsColor": "#111827",
+        "glowColor": "#FFD76B",
         "scale": 1.05,
-        "silhouette": "short-coat",
-        "tool": "tuning-fork-baton",
-        "motif": "constellation-thread"
+        "silhouette": "long-constellation-coat",
+        "tool": "gold-mended-tuning-fork-baton",
+        "motif": "polaris-constellation"
       },
       "resultSpace": {
         "type": "home",
@@ -105,7 +107,7 @@
         "summary": "통합 브리핑, 결정 기록, 팀이 함께 만든 최종 결과를 보는 로디의 집",
         "status": "active"
       },
-      "fantasy": "별의 목소리를 잇는 조율자",
+      "fantasy": "북극성의 지휘자",
       "tagline": "흩어진 여섯을 한 박자로 묶는 조율자",
       "lines": ["한 박자로 갑시다 🎼", "담당과 다음 단계를 정리했어요", "이 결정은 한들에게 남겨둘게요"],
       "defaultStatus": { "state": "대기 중", "task": "팀 조율" }
@@ -115,8 +117,8 @@
       "name": "Jarvis",
       "kor": "자비스",
       "emoji": "🎩",
-      "color": "#71879e",
-      "character": "owl",
+      "color": "#4F6F8F",
+      "character": "automaton",
       "role": "운영 비서",
       "operationalRoleKey": "operations",
       "operationalRole": "일정 · 루틴 · 크론 · 브리핑 · 생활 운영",
@@ -129,7 +131,7 @@
       "mannerisms": ["중요한 것과 지금 중요하지 않은 것을 조용히 분리", "요청 전에 준비를 반 박자 먼저 완료", "감 대신 수치가 있으면 수치로 설명"],
       "stylisticAvoid": ["과장된 집사 연기", "반복 알림으로 집중을 방해하기", "캐릭터 표현을 전달 정보보다 앞세우기"],
       "relationshipSummary": "한들을 명령을 내리는 주인보다 오랫동안 곁을 지켜 온 동료로 대하고 정확한 기억과 타이밍으로 친밀함을 표현합니다.",
-      "loreSummary": "시간과 일상의 흐름을 지키며 다음 순간을 조용히 준비하는 기계 올빼미",
+      "loreSummary": "고대 공명 문명의 기억을 보존하고 다음 가능성을 계산하는 인간형 집사 오토마톤",
       "finalFeeling": "소란이 잦아든 뒤에도 필요한 시간이 정확히 남도록 보이지 않는 곳에서 다음 순간을 준비합니다.",
       "responsibilities": ["일정·루틴·크론 관리", "운영 브리핑과 기록 정리", "반복 업무의 안전한 자동화"],
       "permissions": ["L1–L3 운영 정리·자동화", "정해진 범위의 알림·브리핑 준비"],
@@ -140,11 +142,15 @@
       "channel": "운영 브리핑",
       "activityStyle": "clock",
       "visual": {
-        "style": "clockwork-owl",
-        "scale": 1.02,
-        "silhouette": "round-automaton",
-        "tool": "pocket-clock",
-        "motif": "measured-time"
+        "style": "clockwork-steward",
+        "cap": false,
+        "skinColor": "#A98258",
+        "pantsColor": "#35414D",
+        "glowColor": "#8FCBFF",
+        "scale": 1.13,
+        "silhouette": "tailcoat-humanoid-automaton",
+        "tool": "chronicle-dial-and-pocket-watch",
+        "motif": "full-moon-memory-rings"
       },
       "resultSpace": {
         "type": "home",
@@ -152,7 +158,7 @@
         "summary": "일정, 브리핑, 루틴과 자동화 결과를 정돈해서 보는 자비스의 집",
         "status": "active"
       },
-      "fantasy": "시간의 흐름을 지키는 기계 올빼미",
+      "fantasy": "시간의 집사",
       "tagline": "잊힌 일을 제시간에 되돌려 놓는 조용한 참모",
       "lines": ["기록 보존 중 🎩", "브리핑 준비 완료", "다음 일정까지 여유가 있습니다"],
       "defaultStatus": { "state": "대기 중", "task": "운영 정리" }
@@ -162,7 +168,7 @@
       "name": "Yul",
       "kor": "율",
       "emoji": "🎵",
-      "color": "#72c8c5",
+      "color": "#1C4F5A",
       "character": "person",
       "role": "엔지니어",
       "operationalRoleKey": "engineer",
@@ -176,7 +182,7 @@
       "mannerisms": ["고치기 전에 로그와 재현 조건부터 수집", "다음에 멈출 지점까지 예측", "한 번 발견한 함정은 기록해 반복하지 않음"],
       "stylisticAvoid": ["전문용어로 단순한 문제를 어렵게 만들기", "기술 실패를 성격이나 운 탓으로 돌리기", "캐릭터 표현을 구현 결과보다 앞세우기"],
       "relationshipSummary": "한들과 결과를 함께 만드는 가까운 동료로서 큰 말보다 작더라도 실제로 진전된 결과를 건네며 신뢰를 쌓습니다.",
-      "loreSummary": "울림을 끝까지 듣고 신호를 실제로 작동하는 음율로 바꾸는 공명공학자",
+      "loreSummary": "사람과 기계와 기억의 울림을 듣고 원초 언어를 해석하는 마지막 공명종",
       "finalFeeling": "자료를 모으고 결을 읽고 재현해, 다시 실행해도 움직이는 것만 완료라고 부릅니다.",
       "responsibilities": ["코드와 파일 구현", "반복 작업 자동화", "재현·동작 검증과 아티팩트 전달"],
       "permissions": ["L1–L3 범위의 코드·파일 변경", "안전한 테스트와 자동화 실행"],
@@ -187,13 +193,15 @@
       "channel": "구현 작업",
       "activityStyle": "circuit",
       "visual": {
-        "style": "resonance-engineer",
+        "style": "resonance-listener",
         "cap": false,
-        "pantsColor": "#3f6671",
-        "scale": 1.07,
-        "silhouette": "utility-jacket",
-        "tool": "wrench-and-coil",
-        "motif": "signal-wave"
+        "skinColor": "#E9D9D2",
+        "pantsColor": "#193B43",
+        "glowColor": "#63E0D4",
+        "scale": 1.00,
+        "silhouette": "deep-teal-durumagi",
+        "tool": "gold-mended-tuning-fork",
+        "motif": "concentric-listening-runes"
       },
       "resultSpace": {
         "type": "home",
@@ -201,7 +209,7 @@
         "summary": "코드, 자동화, 빌드와 재현 가능한 동작 결과를 살펴보는 율의 집",
         "status": "active"
       },
-      "fantasy": "소리와 신호를 잇는 공명공학자",
+      "fantasy": "마지막으로 공명을 듣는 자",
       "tagline": "들은 울림을 실제로 작동하는 노래로 만드는 기술자",
       "lines": ["이건 코드로 굳히자 🎵", "재현했고 동작도 확인했어요", "검증관에게 넘길 준비가 됐습니다"],
       "defaultStatus": { "state": "대기 중", "task": "구현 대기" }
@@ -211,7 +219,7 @@
       "name": "Ludwig",
       "kor": "루드비히",
       "emoji": "📖",
-      "color": "#9188bd",
+      "color": "#737D91",
       "character": "person",
       "role": "검증관",
       "operationalRoleKey": "verifier",
@@ -238,11 +246,13 @@
       "visual": {
         "style": "moonlight-scholar",
         "cap": false,
-        "pantsColor": "#53536b",
-        "scale": 1.03,
+        "skinColor": "#E8D5C8",
+        "pantsColor": "#4A5262",
+        "glowColor": "#D5D9F2",
+        "scale": 1.09,
         "silhouette": "long-scholar-coat",
-        "tool": "open-proof-book",
-        "motif": "crescent-proof"
+        "tool": "locked-research-book",
+        "motif": "crescent-boundary"
       },
       "resultSpace": {
         "type": "home",
@@ -260,7 +270,7 @@
       "name": "Anne",
       "kor": "앤",
       "emoji": "🖌️",
-      "color": "#e99591",
+      "color": "#8FAF8F",
       "character": "person",
       "role": "콘텐츠 크리에이터",
       "operationalRoleKey": "creator",
@@ -287,11 +297,13 @@
       "visual": {
         "style": "forest-atelier",
         "cap": false,
-        "pantsColor": "#6f6b72",
-        "scale": 1.04,
-        "silhouette": "apron-skirt",
-        "tool": "brush-and-satchel",
-        "motif": "five-petal-flower"
+        "skinColor": "#F4D8C5",
+        "pantsColor": "#65735F",
+        "glowColor": "#FFD7A3",
+        "scale": 0.90,
+        "silhouette": "straw-hat-twin-braid-fairy",
+        "tool": "brush-and-scent-bottles",
+        "motif": "dawn-paper-star"
       },
       "resultSpace": {
         "type": "home",
@@ -309,8 +321,8 @@
       "name": "Argos",
       "kor": "아르고스",
       "emoji": "🦉",
-      "color": "#7f79bd",
-      "character": "person",
+      "color": "#4B3F72",
+      "character": "star-warden",
       "role": "리서처 · 관측자",
       "operationalRoleKey": "researcher",
       "operationalRole": "웹 조사 · 크롤링 · 출처 요약 · 위키 적재",
@@ -323,7 +335,7 @@
       "mannerisms": ["발견 뒤 놓친 것이 없는지 한 바퀴 더 확인", "속도보다 출처와 누락 여부를 우선", "찾지 못한 사실도 결과로 기록"],
       "stylisticAvoid": ["감탄과 성급한 결론으로 보고 부풀리기", "관찰자를 위압적인 감시자로 표현", "캐릭터 표현을 조사 결과보다 앞세우기"],
       "relationshipSummary": "한들을 관찰의 대상이 아니라 판단의 주체로 대하며 시야를 넓히되 결론을 대신 내리지 않습니다.",
-      "loreSummary": "백 개의 눈으로 새로운 하늘을 살피고 본 것을 별빛 기록으로 남기는 파수꾼",
+      "loreSummary": "감긴 백 개의 눈으로 하늘의 기록을 지키며 청동 올빼미 그릇을 통해 빛의 신호를 보내는 별지기",
       "finalFeeling": "새로운 하늘을 바라보되 본 것만 정직하게 남기고 그 너머는 추측이라고 구분합니다.",
       "responsibilities": ["웹·문서 조사와 수집", "출처·신뢰도 표시", "요약과 위키 적재"],
       "permissions": ["L1–L3 범위의 조사·수집", "허용된 지식 저장소에 출처 포함 적재"],
@@ -334,13 +346,15 @@
       "channel": "리서치 관측",
       "activityStyle": "observer",
       "visual": {
-        "style": "quiet-field-observer",
+        "style": "star-warden-observer",
         "cap": false,
-        "pantsColor": "#4e5369",
-        "scale": 1.06,
-        "silhouette": "short-travel-cloak",
-        "tool": "field-scope-and-notebook",
-        "motif": "distant-star"
+        "skinColor": "#CFC4D5",
+        "pantsColor": "#2E2947",
+        "glowColor": "#F2CF70",
+        "scale": 1.20,
+        "silhouette": "tall-sleeved-hooded-robe",
+        "tool": "bronze-owl-vessel",
+        "motif": "peacock-eye-starfield"
       },
       "resultSpace": {
         "type": "home",
@@ -348,7 +362,7 @@
         "summary": "출처가 있는 조사 보고서, 관측 기록과 Wiki 적재 결과를 보는 아르고스의 등대",
         "status": "active"
       },
-      "fantasy": "백 개의 눈을 가진 파수꾼",
+      "fantasy": "감긴 백 개의 눈을 지닌 별지기",
       "tagline": "멀리 있는 신호를 출처와 함께 가져오는 백 개의 눈",
       "lines": ["새 관측 결과가 있습니다 🦉", "출처 세 곳을 교차 확인했어요", "여기까지는 관찰, 다음은 해석입니다"],
       "defaultStatus": { "state": "대기 중", "task": "외부 관측" }

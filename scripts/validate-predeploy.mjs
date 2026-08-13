@@ -71,15 +71,20 @@ for (const gap of signatureAudit.gaps) errors.push('시그니처 에셋: ' + gap
 
 const expectedVisualStyles = new Set([
   'companion-conductor',
-  'clockwork-owl',
-  'resonance-engineer',
+  'clockwork-steward',
+  'resonance-listener',
   'moonlight-scholar',
   'forest-atelier',
-  'quiet-field-observer',
+  'star-warden-observer',
 ]);
+const expectedCharacterTypes = new Set(['person', 'automaton', 'star-warden']);
 for (const agent of agents) {
   if (!/^#[0-9a-f]{6}$/i.test(agent.color || '')) errors.push(`${agent.key}: color는 #rrggbb 형식이어야 합니다`);
+  if (!expectedCharacterTypes.has(agent.character || 'person')) errors.push(`${agent.key}: 알 수 없는 character (${agent.character || '없음'})`);
   if (!expectedVisualStyles.has(agent.visual?.style)) errors.push(`${agent.key}: 알 수 없는 visual.style (${agent.visual?.style || '없음'})`);
+  for (const field of ['skinColor', 'pantsColor', 'glowColor']) {
+    if (!/^#[0-9a-f]{6}$/i.test(agent.visual?.[field] || '')) errors.push(`${agent.key}: visual.${field}는 #rrggbb 형식이어야 합니다`);
+  }
   if (agent.visual?.scale !== undefined && (!Number.isFinite(agent.visual.scale) || agent.visual.scale < 0.86 || agent.visual.scale > 1.22)) {
     errors.push(`${agent.key}: visual.scale은 0.86~1.22 숫자여야 합니다`);
   }
@@ -123,7 +128,31 @@ if (runtimeConfig?.publication?.mode === 'live') {
   if (typeof statusPayload?.isStale !== 'boolean') errors.push('agent-status.json: live mode에는 isStale boolean이 필요합니다');
 }
 
-if (!siteConfig?.publicUrl) warnings.push('config/site.json: publicUrl이 비어 있습니다');
+let normalizedPublicUrl = '';
+if (!siteConfig?.publicUrl) {
+  warnings.push('config/site.json: publicUrl이 비어 있습니다');
+} else {
+  try {
+    const url = new URL(siteConfig.publicUrl);
+    if (url.protocol !== 'https:') errors.push('config/site.json: publicUrl은 HTTPS여야 합니다');
+    if (url.username || url.password || url.search || url.hash) {
+      errors.push('config/site.json: publicUrl에 인증 정보·쿼리·해시를 넣을 수 없습니다');
+    }
+    if (!url.pathname.endsWith('/')) errors.push('config/site.json: publicUrl은 /로 끝나야 합니다');
+    normalizedPublicUrl = url.href;
+  } catch (_) {
+    errors.push('config/site.json: publicUrl 형식이 올바르지 않습니다');
+  }
+}
+if (siteConfig?.homepageUrl) {
+  try {
+    if (new URL(siteConfig.homepageUrl).protocol !== 'https:') {
+      errors.push('config/site.json: homepageUrl은 HTTPS여야 합니다');
+    }
+  } catch (_) {
+    errors.push('config/site.json: homepageUrl 형식이 올바르지 않습니다');
+  }
+}
 if (!siteConfig?.githubUrl) warnings.push('config/site.json: githubUrl이 비어 있습니다');
 
 const index = read('index.html');
@@ -131,7 +160,18 @@ const boot = read('src/boot.js');
 const main = read('src/main.js');
 const style = read('src/style.css');
 const sw = read('sw.js');
+const robots = read('robots.txt');
+const sitemap = read('sitemap.xml');
 const deployWorkflow = read('.github/workflows/deploy.yml');
+if (normalizedPublicUrl) {
+  const canonicalUrl = index.match(/id="canonicalUrl"[^>]+href="([^"]+)"/)?.[1] || '';
+  const openGraphUrl = index.match(/id="ogUrl"[^>]+content="([^"]+)"/)?.[1] || '';
+  const sitemapUrl = new URL('sitemap.xml', normalizedPublicUrl).href;
+  if (canonicalUrl !== normalizedPublicUrl) errors.push('index.html: canonical URL이 config/site.json과 다릅니다');
+  if (openGraphUrl !== normalizedPublicUrl) errors.push('index.html: og:url이 config/site.json과 다릅니다');
+  if (!robots.includes(`Sitemap: ${sitemapUrl}`)) errors.push('robots.txt: sitemap URL이 publicUrl과 다릅니다');
+  if (!sitemap.includes(`<loc>${normalizedPublicUrl}</loc>`)) errors.push('sitemap.xml: 대표 URL이 publicUrl과 다릅니다');
+}
 const ids = [...index.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 const duplicateIds = ids.filter((id, index_) => ids.indexOf(id) !== index_);
 if (duplicateIds.length) errors.push(`index.html: 중복 id (${[...new Set(duplicateIds)].join(', ')})`);
@@ -145,6 +185,9 @@ if (!scriptPolicy || /'unsafe-inline'/.test(scriptPolicy)) {
 }
 if (/fonts\.(?:googleapis|gstatic)\.com/i.test(index) || /fonts\.(?:googleapis|gstatic)\.com/i.test(style)) {
   errors.push('외부 Google Fonts 의존성이 남아 있습니다');
+}
+if (!deployWorkflow.includes('node scripts/sync-site-metadata.mjs')) {
+  errors.push('.github/workflows/deploy.yml: 사이트 메타데이터 동기화 단계가 없습니다');
 }
 if (!main.includes("from '../vendor/three/build/three.module.min.js'")) {
   errors.push('src/main.js: Three.js core가 로컬 고정 경로를 사용하지 않습니다');

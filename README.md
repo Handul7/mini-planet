@@ -16,23 +16,23 @@ names, colors, roles, public persona notes, speech lines, or character visuals. 
 are needed as long as the six stable keys stay aligned across status/services/results. Full Hermes SOUL files stay private; this repository contains only concise,
 human-reviewed public projections.
 
-Each roster entry also owns a small `visual` profile. Its stable style enum, scale, cap,
+Each roster entry also owns a small `visual` profile. Its stable style enum, body type, scale,
 and color options drive the Three.js character design; silhouette/tool/motif fields document
-the art direction beside the role. This keeps appearance aligned without key-specific
-rendering rules.
+the art direction beside the role. Renderer tests keep those public contracts aligned with the
+setting-book canon and each owner's home marker.
 
 | Agent | 실제 역할 (SOUL) | 판타지 정체성 | 집 |
 |-------|------------------|----------------|----|
-| **Rodi** 로디 | 메인 오케스트레이터 | 별의 목소리를 잇는 조율자 | 마을 광장 (금빛) |
-| **Jarvis** 자비스 | 운영 비서 | 시간의 흐름을 지키는 기계 올빼미 *(3D도 올빼미!)* | 마을 광장 (남청) |
-| **Yul** 율 | 엔지니어 | 소리와 신호를 잇는 공명공학자 | 마을 광장 (청록) |
-| **Ludwig** 루드비히 | 검증관 | 달빛의 공명학자 | 마을 광장 (보라) |
-| **Anne** 앤 | 콘텐츠 크리에이터 | 향기를 세공하는 숲의 요정 | 마을 광장 (산호) |
-| **Argos** 아르고스 | 리서처 · 관측자 | 백 개의 눈을 가진 파수꾼 | **행성 반대편 등대곶** (남보라) |
+| **Rodi** 로디 | 메인 오케스트레이터 | 북극성의 지휘자 | 마을 광장 (미드나이트 네이비) |
+| **Jarvis** 자비스 | 운영 비서 | 시간의 집사 · 인간형 오토마톤 | 마을 광장 (스틸 블루) |
+| **Yul** 율 | 엔지니어 | 마지막으로 공명을 듣는 자 | 마을 광장 (딥 틸) |
+| **Ludwig** 루드비히 | 검증관 | 달빛의 공명학자 | 마을 광장 (문라이트 그레이) |
+| **Anne** 앤 | 콘텐츠 크리에이터 | 향기를 세공하는 숲의 요정 | 마을 광장 (세이지 그린) |
+| **Argos** 아르고스 | 리서처 · 관측자 | 감긴 백 개의 눈을 지닌 별지기 | **행성 반대편 등대곶** (나이트워치 바이올렛) |
 
-Each agent owns a cottage (marked by a flag in their color) and wanders near it,
-chatting in role-flavored speech bubbles — and occasionally reporting their current task.
-Argos, the watchman, keeps his distance: his home is the red-and-white lighthouse on the far cape.
+Five agents own cottages and Argos owns the lighthouse; every home carries its owner's palette,
+facade crest, roof signature, and flag. Agents wander nearby, chatting in role-flavored speech
+bubbles and occasionally reporting their current task. Argos keeps his distance at the violet-and-white far-cape lighthouse.
 Each home is also that agent's personal result space. The same door now opens service details
 and up to six sanitized recent results without adding another central building.
 
@@ -71,14 +71,14 @@ and up to six sanitized recent results without adding another central building.
   to `localStorage` with visible save feedback, undo/redo, restorable safety backups before reset/import,
   and versioned JSON export/import. Agent homes (flags, nameplates,
   service doors) follow the houses around.
-- **Animated characters** — config-driven little people (and one owl) with swinging limbs,
+- **Animated characters** — six config-driven humanoid rigs, plus Argos's bronze owl vessel, with swinging limbs,
   role-specific clothing silhouettes and tools, building/water collision, and obstacle avoidance.
   Live states add restrained role-specific motifs: Rodi conducts, Jarvis keeps time, Yul
-  traces a circuit, Ludwig reviews proofs, Anne shapes petals, and Argos observes. Review,
+  listens for resonance, Ludwig reviews proofs, Anne shapes petals, and Argos observes. Review,
   completion, and error states change the same motif instead of spawning permanent clutter.
 - **Agent signature homes** — each public `visual.style` maps to a lightweight code-native
-  landmark: Rodi's harmonic fork, Jarvis's clock crown, Yul's signal array, Ludwig's
-  crescent archive, Anne's atelier flower, and Argos's observer ring. The catalog lives in
+  landmark: Rodi's repaired harmonic fork, Jarvis's chronicle dial, Yul's resonance fork,
+  Ludwig's locked crescent archive, Anne's scent atelier, and Argos's owl observatory. The catalog lives in
   [`src/agent-signatures.js`](src/agent-signatures.js), while geometry stays in
   [`src/main.js`](src/main.js). Updating a style without a registered signature fails the
   release tests instead of silently producing a generic home.
@@ -270,15 +270,23 @@ workflow publishes to GitHub Pages on every push to `main` (Settings → Pages �
 **GitHub Actions**). Any static host (Netlify, Vercel, Cloudflare Pages) works too.
 HTTPS is required for service workers and the optional weather API.
 
-Before publishing, set the public links in `config/site.json`:
+Before publishing, set the public links in `config/site.json`. When Mini Planet itself is
+the main homepage, use the root domain as `publicUrl` and leave `homepageUrl` blank so the
+visitor panel does not link back to the page it is already showing:
 
 ```json
 {
-  "publicUrl": "https://your-domain.example/mini-planet/",
-  "homepageUrl": "https://your-domain.example/",
+  "publicUrl": "https://your-domain.example/",
+  "homepageUrl": "",
   "githubUrl": "https://github.com/your-name/mini-planet"
 }
 ```
+
+Run `node scripts/sync-site-metadata.mjs` after changing the domain. It updates the static
+canonical/Open Graph tags, PWA description, `robots.txt`, and `sitemap.xml`; the deployment
+workflow also runs it automatically before validation and upload. Configure the same hostname
+in the chosen static host and enable HTTPS. Desktop and mobile visitors use the same URL; the
+responsive UI and input mode adapt in the browser.
 
 Blank values are intentionally hidden. All app URLs are relative, so project Pages URLs such as
 `https://name.github.io/mini-planet/` work without a build-time base path. Local endpoints and
