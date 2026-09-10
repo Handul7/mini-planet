@@ -29,6 +29,26 @@ function json(relative) {
   }
 }
 
+function pngDimensions(relative) {
+  const target = resolve(root, relative);
+  if (!existsSync(target)) {
+    errors.push(`이미지 파일 없음: ${relative}`);
+    return null;
+  }
+  try {
+    const bytes = readFileSync(target);
+    const signature = bytes.subarray(0, 8).toString('hex');
+    if (signature !== '89504e470d0a1a0a' || bytes.length < 24) {
+      errors.push(`${relative}: 유효한 PNG 파일이 아닙니다`);
+      return null;
+    }
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  } catch (error) {
+    errors.push(`${relative}: 이미지 크기를 읽을 수 없습니다 (${error.message})`);
+    return null;
+  }
+}
+
 function unique(values) {
   return new Set(values).size === values.length;
 }
@@ -163,14 +183,37 @@ const sw = read('sw.js');
 const robots = read('robots.txt');
 const sitemap = read('sitemap.xml');
 const deployWorkflow = read('.github/workflows/deploy.yml');
+const gitignore = read('.gitignore');
 if (normalizedPublicUrl) {
   const canonicalUrl = index.match(/id="canonicalUrl"[^>]+href="([^"]+)"/)?.[1] || '';
   const openGraphUrl = index.match(/id="ogUrl"[^>]+content="([^"]+)"/)?.[1] || '';
+  const openGraphImage = index.match(/id="ogImage"[^>]+content="([^"]+)"/)?.[1] || '';
+  const twitterImage = index.match(/id="twitterImage"[^>]+content="([^"]+)"/)?.[1] || '';
   const sitemapUrl = new URL('sitemap.xml', normalizedPublicUrl).href;
+  const socialImageUrl = new URL('assets/social/og-image.png', normalizedPublicUrl).href;
   if (canonicalUrl !== normalizedPublicUrl) errors.push('index.html: canonical URL이 config/site.json과 다릅니다');
   if (openGraphUrl !== normalizedPublicUrl) errors.push('index.html: og:url이 config/site.json과 다릅니다');
+  if (openGraphImage !== socialImageUrl) errors.push('index.html: og:image가 publicUrl 기준 절대 URL이 아닙니다');
+  if (twitterImage !== socialImageUrl) errors.push('index.html: twitter:image가 publicUrl 기준 절대 URL이 아닙니다');
   if (!robots.includes(`Sitemap: ${sitemapUrl}`)) errors.push('robots.txt: sitemap URL이 publicUrl과 다릅니다');
   if (!sitemap.includes(`<loc>${normalizedPublicUrl}</loc>`)) errors.push('sitemap.xml: 대표 URL이 publicUrl과 다릅니다');
+}
+if (!/<meta\s+name="twitter:card"\s+content="summary_large_image"\s*\/>/.test(index)) {
+  errors.push('index.html: Twitter large image card 설정이 없습니다');
+}
+if (!/property="og:image:width"\s+content="1200"/.test(index) || !/property="og:image:height"\s+content="630"/.test(index)) {
+  errors.push('index.html: Open Graph 이미지 규격 메타데이터가 올바르지 않습니다');
+}
+if (!/property="og:image:alt"\s+content="[^"]+"/.test(index)) errors.push('index.html: og:image:alt가 없습니다');
+if (!index.includes('<link rel="icon" href="favicon.ico" sizes="any" />')) errors.push('index.html: 실제 favicon 링크가 없습니다');
+if (!index.includes('<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" sizes="180x180" />')) {
+  errors.push('index.html: apple-touch-icon 링크가 없습니다');
+}
+const localEditNotice = '이 편집은 현재 브라우저에만 저장되며 공개 홈페이지 원본은 변경하지 않습니다.';
+if (index.split(localEditNotice).length - 1 < 2) errors.push('index.html: 편집 진입부와 편집 도구에 브라우저 전용 저장 안내가 모두 필요합니다');
+if (runtimeConfig?.publication?.mode === 'static-demo'
+  && !index.includes('정적 데모 · Hermes 미연결 · 상태와 결과는 공개용 샘플입니다.')) {
+  errors.push('index.html: static-demo 공개 고지가 없습니다');
 }
 const ids = [...index.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 const duplicateIds = ids.filter((id, index_) => ids.indexOf(id) !== index_);
@@ -189,11 +232,54 @@ if (/fonts\.(?:googleapis|gstatic)\.com/i.test(index) || /fonts\.(?:googleapis|g
 if (!deployWorkflow.includes('node scripts/sync-site-metadata.mjs')) {
   errors.push('.github/workflows/deploy.yml: 사이트 메타데이터 동기화 단계가 없습니다');
 }
+if (!deployWorkflow.includes('node scripts/build-site.mjs')
+  || !deployWorkflow.includes('node scripts/validate-site-artifact.mjs _site')) {
+  errors.push('.github/workflows/deploy.yml: 최소 Pages artifact 생성·검증 단계가 없습니다');
+}
+if (!/upload-pages-artifact@[\s\S]+?with:\s*\n\s+path:\s+_site\b/.test(deployWorkflow)) {
+  errors.push('.github/workflows/deploy.yml: Pages 업로드 경로는 _site여야 합니다');
+}
+if (!gitignore.split(/\r?\n/).includes('_site/')) errors.push('.gitignore: 생성된 _site/ 제외 규칙이 없습니다');
 if (!main.includes("from '../vendor/three/build/three.module.min.js'")) {
   errors.push('src/main.js: Three.js core가 로컬 고정 경로를 사용하지 않습니다');
 }
 if (/unpkg\.com/i.test(index) || /unpkg\.com/i.test(boot) || /unpkg\.com/i.test(main) || /unpkg\.com/i.test(sw)) {
   errors.push('런타임 코드에 제거되지 않은 unpkg CDN 의존성이 있습니다');
+}
+
+const artDirectionReport = 'docs/world-art-direction-improvement-report.md';
+if (!existsSync(resolve(root, artDirectionReport))) {
+  errors.push(`${artDirectionReport}: 월드 배치 기준 보고서가 없습니다`);
+}
+for (const type of ['streetLamp', 'wayfinder', 'agentStation', 'harborCrane', 'dockBollard', 'cargoCluster']) {
+  if (!new RegExp(`\\b${type}:\\s*\\{`).test(main)) errors.push(`src/main.js: 아트 디렉션 오브젝트 ${type} 등록이 없습니다`);
+}
+const frontLayoutSource = main.slice(
+  main.indexOf('const HARBOR_FRONT_LAYOUT = ['),
+  main.indexOf('const HARBOR_REAR_LAYOUT = ['),
+);
+const stationKeys = [...frontLayoutSource.matchAll(/type: 'agentStation', agentKey: '([^']+)'/g)]
+  .map((match) => match[1]);
+const duplicateStations = stationKeys.filter((key, index_) => stationKeys.indexOf(key) !== index_);
+if (duplicateStations.length) errors.push(`src/main.js: 중앙 작업대 중복 (${[...new Set(duplicateStations)].join(', ')})`);
+if (stationKeys.length) errors.push('src/main.js: 간소화된 기본 배치에 중앙 작업대가 남아 있습니다');
+const districtAnchorSource = main.slice(
+  main.indexOf('const AGENT_DISTRICT_ANCHORS = Object.freeze({'),
+  main.indexOf('const DASHBOARD_VIEW_DIR ='),
+);
+const missingDistrictAnchors = agentKeys
+  .filter((key) => key !== 'argos')
+  .filter((key) => !new RegExp(`\\b${key}: Object\\.freeze\\(\\[`).test(districtAnchorSource));
+if (missingDistrictAnchors.length) {
+  errors.push(`src/main.js: 에이전트 작업 앵커 누락 (${missingDistrictAnchors.join(', ')})`);
+}
+if (!/function findHomeWorkDir\(home, preferred\)/.test(main)
+    || !/a\.workDir = findHomeWorkDir\(home, district\)/.test(main)) {
+  errors.push('src/main.js: 등대를 포함한 주택 외곽의 안전 작업 지점 계산이 없습니다');
+}
+if (!/type: 'lane'/.test(main)) errors.push('src/main.js: 마을 보행 골목 경로가 없습니다');
+if (/type: '(?:busStop|utilityPole)'/.test(frontLayoutSource)) {
+  errors.push('src/main.js: 기본 항구 배치에 시험용 단일 도로 소품이 남아 있습니다');
 }
 
 const threeVendorFiles = [
@@ -220,6 +306,34 @@ const localFontFiles = [
   'assets/fonts/nunito-latin-700-normal.woff2',
   'assets/fonts/nunito-latin-800-normal.woff2',
 ];
+const publicImageFiles = [
+  ['assets/social/og-image.png', 1200, 630],
+  ['assets/icons/icon-192.png', 192, 192],
+  ['assets/icons/icon-512.png', 512, 512],
+  ['assets/icons/apple-touch-icon.png', 180, 180],
+];
+for (const [relative, width, height] of publicImageFiles) {
+  const size = pngDimensions(relative);
+  if (size && (size.width !== width || size.height !== height)) {
+    errors.push(`${relative}: ${width}x${height} 규격이어야 합니다 (현재 ${size.width}x${size.height})`);
+  }
+}
+if (!existsSync(resolve(root, 'favicon.ico')) || readFileSync(resolve(root, 'favicon.ico')).length < 100) {
+  errors.push('favicon.ico: 실제 아이콘 파일이 없거나 비어 있습니다');
+}
+const requiredManifestIcons = [
+  ['assets/icons/icon-192.png', '192x192', 'any'],
+  ['assets/icons/icon-512.png', '512x512', 'any maskable'],
+];
+for (const [src, sizes, purpose] of requiredManifestIcons) {
+  const icon = manifestConfig?.icons?.find((entry) => entry?.src === src);
+  if (!icon || icon.sizes !== sizes || icon.type !== 'image/png' || icon.purpose !== purpose) {
+    errors.push(`manifest.json: ${src}의 sizes/type/purpose 설정이 올바르지 않습니다`);
+  }
+}
+for (const relative of ['favicon.ico', ...publicImageFiles.slice(1).map(([file]) => file)]) {
+  if (!sw.includes(`'./${relative}'`)) errors.push(`sw.js SHELL에 빠진 앱 아이콘: ./${relative}`);
+}
 for (const relative of localFontFiles) {
   if (!existsSync(resolve(root, relative))) errors.push(`로컬 폰트 파일 없음: ${relative}`);
   if (relative.endsWith('.woff2') && !sw.includes(`'./${relative}'`)) {
@@ -347,7 +461,7 @@ for (const [key, service] of Object.entries(servicesConfig?.services || {})) {
   }
 }
 
-const appJsFiles = ['src/boot.js', 'src/main.js', 'src/status-source.js', 'src/public-dashboard.js', 'src/release-quality.js', 'src/sky.js', 'src/ambient-audio.js', 'src/performance.js', 'src/agent-activity.js', 'src/agent-results.js', 'src/agent-signatures.js', 'src/input-controls.js'];
+const appJsFiles = ['src/boot.js', 'src/main.js', 'src/status-source.js', 'src/public-dashboard.js', 'src/release-quality.js', 'src/sky.js', 'src/ambient-audio.js', 'src/performance.js', 'src/agent-activity.js', 'src/agent-results.js', 'src/agent-signatures.js', 'src/input-controls.js', 'src/paper-style.js', 'src/world/harbor-kit.js', 'assets/papercut/contours.js'];
 for (const file of appJsFiles) {
   if (/from\s+['"]three(?:\/[^'"]*)?['"]/.test(read(file))) {
     errors.push(`${file}: import map이 필요한 bare Three.js import가 남아 있습니다`);
@@ -359,7 +473,7 @@ for (const file of appJsFiles) {
 info.push(`에이전트 ${agents.length}명 · 서비스 ${serviceKeys.length}개 · 상태 ${statusKeys.length}개 · 결과 공간 ${resultKeys.length}개`);
 info.push(`번들 GLTF ${modelFiles.length}개와 Three.js ${threeVendorFiles.length - 2}개 런타임 파일 검사`);
 info.push(`로컬 Nunito WOFF2 ${localFontFiles.filter((file) => file.endsWith('.woff2')).length}개와 OFL 라이선스 검사`);
-info.push(`앱 캐시 v${cacheVersion || '?'} · JavaScript ${moduleImports.length + 2}개 문법 검사`);
+info.push(`앱 캐시 v${cacheVersion || '?'} · JavaScript ${appJsFiles.length}개 문법 검사`);
 info.push(`공개 모드 ${runtimeConfig?.publication?.mode || '?'} · 상태 schema v${statusSchemaVersion || 'legacy'}`);
 
 for (const line of info) console.log(`✓ ${line}`);

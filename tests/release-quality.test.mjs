@@ -68,6 +68,33 @@ test('layout audit detects duplicate ownership and close colliders', () => {
   assert.equal(audit.overlaps.length, 1);
 });
 
+test('layout audit blocks a visitor spawn inside a solid prop', () => {
+  const audit = auditLayout({
+    entries: [
+      { type: 'cottage', ownerKey: 'rodi', n: [0, 0, 1], radius: 0.2 },
+      { type: 'opsBeacon', n: [0, 1, 0], radius: 0.13 },
+    ],
+    expectedOwners: ['rodi'],
+    spawnN: [0, 1, 0],
+  });
+  assert.equal(audit.status, 'blocked');
+  assert.equal(audit.spawnObstructions.length, 1);
+  assert.match(audit.errors.join(' '), /시작 지점 충돌/);
+});
+
+test('layout audit accepts a separated visitor spawn', () => {
+  const audit = auditLayout({
+    entries: [
+      { type: 'cottage', ownerKey: 'rodi', n: [0, 0, 1], radius: 0.2 },
+      { type: 'opsBeacon', n: [0, 1, 0], radius: 0.13 },
+    ],
+    expectedOwners: ['rodi'],
+    spawnN: [1, 0, 0],
+  });
+  assert.equal(audit.status, 'ready');
+  assert.deepEqual(audit.spawnObstructions, []);
+});
+
 test('layout audit compares angular collider radii in surface units', () => {
   const audit = auditLayout({
     entries: [

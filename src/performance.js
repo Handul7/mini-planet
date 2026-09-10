@@ -3,21 +3,21 @@ const QUALITY_ORDER = ['performance', 'balanced', 'high'];
 const QUALITY_PROFILES = Object.freeze({
   high: Object.freeze({
     maxPixelRatio: 1.6,
-    bloomStrength: 0.27,
+    bloomStrength: 0.10,
     shadowMapSize: 1536,
     shadowFps: 60,
     rainSegments: 460,
   }),
   balanced: Object.freeze({
     maxPixelRatio: 1.35,
-    bloomStrength: 0.24,
+    bloomStrength: 0.08,
     shadowMapSize: 1024,
     shadowFps: 30,
     rainSegments: 380,
   }),
   performance: Object.freeze({
     maxPixelRatio: 1,
-    bloomStrength: 0.20,
+    bloomStrength: 0.06,
     shadowMapSize: 1024,
     shadowFps: 20,
     rainSegments: 300,

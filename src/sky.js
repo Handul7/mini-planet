@@ -23,7 +23,7 @@ export function createSkySystem({
   const stars = createStars(scene);
   const clouds = createClouds(scene, radius);
   const rain = createRain(scene, radius);
-  const { hemi, sun } = createLights(scene);
+  const { hemi, sun } = createLights(scene, radius);
   let performanceTier = 'high';
   const sunDir = sun.position.clone().normalize();
   const celestial = createCelestialBodies(scene, sunDir);
@@ -750,7 +750,7 @@ function createRain(scene, radius) {
   };
 }
 
-function createLights(scene) {
+function createLights(scene, radius) {
   const hemi = new THREE.HemisphereLight(0xeaf7ff, 0x8aa29a, 1.05);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfffbf2, 1.35);
@@ -759,12 +759,15 @@ function createLights(scene) {
   sun.shadow.mapSize.set(1024, 1024);
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 120;
-  sun.shadow.camera.left = -40;
-  sun.shadow.camera.right = 40;
-  sun.shadow.camera.top = 40;
-  sun.shadow.camera.bottom = -40;
-  sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.045;
+  // Spend the existing shadow resolution on the planet and its tallest props.
+  // The old 80-unit span smeared thin cardstock layers into diagonal bands.
+  const shadowExtent = Math.max(18, radius * 2.2);
+  sun.shadow.camera.left = -shadowExtent;
+  sun.shadow.camera.right = shadowExtent;
+  sun.shadow.camera.top = shadowExtent;
+  sun.shadow.camera.bottom = -shadowExtent;
+  sun.shadow.bias = -0.00015;
+  sun.shadow.normalBias = 0.018;
   sun.shadow.radius = 3;
   scene.add(sun);
   return { hemi, sun };

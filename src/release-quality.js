@@ -107,7 +107,11 @@ function surfaceDistance(a, b, planetRadius) {
   return Math.acos(dot) * planetRadius;
 }
 
-const HOME_VIEW_CLEARANCE = 3.5;
+// Compact street-facing homes need enough silhouette separation without being
+// forced into an exhibition ring. 2 world units still leaves clear space
+// around the 1.7-1.9-unit default cottages; colliders and door approaches are
+// audited independently below.
+const HOME_VIEW_CLEARANCE = 2.0;
 const HOME_APPROACH_CLEARANCE = 0.42;
 
 function interpolateDirection(a, b, t) {
@@ -132,6 +136,8 @@ export function auditLayout({
   requiredTypes = ['opsBeacon'],
   planetRadius = 7.47,
   maxEntries = 400,
+  spawnN = null,
+  spawnClearance = 0.34,
 } = {}) {
   const points = (Array.isArray(entries) ? entries : []).slice(0, maxEntries).map((entry, index) => ({
     index,
@@ -175,6 +181,26 @@ export function auditLayout({
     }
   }
   if (overlaps.length) warnings.push(`이동 충돌 가능 배치: ${overlaps.length}쌍`);
+
+  // A visually valid layout can still be unplayable when the visitor starts
+  // inside a collider. Keep this as a release-blocking invariant because a
+  // trapped first spawn makes every other interaction unreachable.
+  const spawn = normalizedVector(spawnN);
+  const spawnObstructions = [];
+  if (spawn) {
+    for (const obstacle of collidable) {
+      const required = obstacle.radius * planetRadius + Math.max(0, spawnClearance);
+      const distance = surfaceDistance(spawn, obstacle.n, planetRadius);
+      if (distance >= required) continue;
+      spawnObstructions.push({
+        obstacle: obstacle.index,
+        obstacleType: obstacle.type,
+        distance,
+        required,
+      });
+    }
+  }
+  if (spawnObstructions.length) errors.push(`시작 지점 충돌: ${spawnObstructions.length}개`);
   const homeClearance = [];
   const homes = points.filter((point) => point.n && point.ownerKey);
   for (let i = 0; i < homes.length; i++) {
@@ -221,6 +247,7 @@ export function auditLayout({
     errors,
     warnings,
     overlaps,
+    spawnObstructions,
     homeClearance,
     doorObstructions,
     missingOwners,

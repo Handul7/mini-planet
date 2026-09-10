@@ -5,11 +5,26 @@ import { UnrealBloomPass } from '../vendor/three/examples/jsm/postprocessing/Unr
 import { ShaderPass } from '../vendor/three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from '../vendor/three/examples/jsm/postprocessing/OutputPass.js';
 import { GLTFLoader } from '../vendor/three/examples/jsm/loaders/GLTFLoader.js';
+import { mergeGeometries } from '../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
+import { applyPaperSurface, applyPaperObject, makePaperCanopy, paperCutGeometry } from './paper-style.js?v=97';
+import { makePaperSlab, makePaperHouseShell, makePaperRelief, makePaperTierRoof, makePaperTower, makePaperWindowTrim, makePaperDoor, makePaperRose } from './world/paper-assets.js?v=105';
+import { makePaperPublicSpace } from './world/public-spaces.js?v=105';
+import { createRoseStory } from './rose-story.js?v=105';
+import { createVillageBoard } from './village-board.js?v=102';
+import { createStableSceneTarget, stabilizePaperShadows } from './render-stability.js?v=102';
+import { createVisibilityLoop, createElementSizeCache } from './render-efficiency.js?v=104';
+import { oceanBandBounds, streetNetworkState, findSurfaceRoute } from './world/spatial-structure.js?v=103';
+import {
+  makeCottageArchitecture,
+  makeHedgeLine,
+  makeQuayRail,
+  makeStreetEdges,
+} from './world/harbor-kit.js?v=105';
 import { createAgentStatusSource } from './status-source.js?v=70';
-import { createSkySystem } from './sky.js?v=70';
-import { createAmbientAudio } from './ambient-audio.js?v=62';
+import { createSkySystem } from './sky.js?v=97';
+import { createAmbientAudio } from './ambient-audio.js?v=104';
 import { createAgentActivityTools } from './agent-activity.js?v=70';
-import { createPerformanceGovernor } from './performance.js?v=63';
+import { createPerformanceGovernor } from './performance.js?v=64';
 import { signatureForAgent } from './agent-signatures.js?v=72';
 import { readGamepadControls } from './input-controls.js?v=71';
 import {
@@ -20,7 +35,7 @@ import {
   normalizePublicDashboardView,
   selectPublicResultProjection,
 } from './public-dashboard.js?v=70';
-import { auditLayout, summarizeFleet } from './release-quality.js?v=75';
+import { auditLayout, summarizeFleet } from './release-quality.js?v=76';
 import {
   formatResultDate,
   mergePublicResults,
@@ -32,6 +47,7 @@ import {
 } from './agent-results.js?v=60';
 
 const URL_PARAMS = new URLSearchParams(location.search);
+const villageBoard = await createVillageBoard();
 const DEV_TIME_SHIFT_MS = URL_PARAMS.has('dev')
   ? Number(URL_PARAMS.get('timeShiftHours') || 0) * 3600000
   : 0;
@@ -170,7 +186,8 @@ try {
 // ===========================================================================
 const THEME = {
   world: {
-    planet:   0x2f6fa8,                                  // ocean globe; islands are explicit land caps
+    planet:   0x86a47b,                                  // land globe; water exists only in registered sea meshes
+    landDeep: 0x365846,
     outline:  0x5d6268,                                  // soft graphite line; agents carry the color accents
     fogDay:   0xdceff7, fogTwilight: 0xe8d8df, fogNight: 0x25344a,
     skyDay:   { top: 0x6fb7e8, mid: 0xa8d8f0, bottom: 0xeaf6ff },
@@ -179,11 +196,11 @@ const THEME = {
     skyTwilight: { top: 0x879fd1, mid: 0xd4aeca, bottom: 0xf7c7aa },
     skyNight: { top: 0x07142f, mid: 0x18314f, bottom: 0x4c6173 },
     water:    0x72c9e8,
-    seaDeep:  0x2c6798, seaMid: 0x4b8fbd, seaFoam: 0xeaf8f5,
-    coastSand: 0xd8cbaa, breakwater: 0xaeb2b2,
-    islandGrass: 0xa7ba93, harborDeck: 0xa68f79,
+    seaDeep:  0x287d91, seaMid: 0x58b5c2, seaFoam: 0xf1faf5,
+    coastSand: 0xeee2bd, breakwater: 0xa8bcc2,
+    islandGrass: 0xa8cb92, harborDeck: 0xad8881,
     marketPath: 0xc2b291, camelliaPath: 0x8fa584,
-    roadAsphalt: 0xb8b4ad, roadLine: 0xc9c4b5,
+    roadAsphalt: 0xc7cdbd, roadLine: 0xebeee4,
     dirt:     0x987d60,
     snowTop:  0xf4f9fd, snowEdge: 0xcfe0ea,
     rosePetal: 0xd91f4e, roseCore: 0xa80f38,
@@ -331,14 +348,14 @@ renderer.domElement.addEventListener('webglcontextrestored', () => {
 // ---------------------------------------------------------------------------
 // Post-processing: bloom (soft light glow) + vignette
 // ---------------------------------------------------------------------------
-const composer = new EffectComposer(renderer);
+const composer = new EffectComposer(renderer, createStableSceneTarget(renderer, innerWidth, innerHeight));
 composer.addPass(new RenderPass(scene, camera));
 
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(innerWidth, innerHeight),
-  0.27,   // strength — light is an accent, not a veil over the diorama
+  0.10,   // Paper stays matte; active signals retain a restrained glow.
   0.62,   // radius
-  0.92    // threshold (only the sun, lamps, and active signals bloom)
+  1.40    // Keep sunlit paper below the glow threshold.
 );
 composer.addPass(bloom);
 
@@ -387,43 +404,125 @@ const performanceGovernor = createPerformanceGovernor({
 // ---------------------------------------------------------------------------
 function makeToonGradient(steps = 4) {
   const data = new Uint8Array(steps);
-  for (let i = 0; i < steps; i++) data[i] = Math.round((i / (steps - 1)) * 255);
+  for (let i = 0; i < steps; i++) data[i] = Math.round(112 + (i / (steps - 1)) * 143);
   const tex = new THREE.DataTexture(data, steps, 1, THREE.RedFormat);
   tex.minFilter = tex.magFilter = THREE.NearestFilter;
   tex.needsUpdate = true;
   return tex;
 }
-const TOON_GRAD = makeToonGradient(4);   // one extra band softens the low-poly forms into anime-like paint
+const TOON_GRAD = makeToonGradient(3);   // Three matte ink values on colored cardstock.
 
 // build a toon material with the same gradient ramp for the whole world
 function toonMat(color) {
-  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_GRAD });
+  return applyPaperSurface(new THREE.MeshToonMaterial({ color, gradientMap: TOON_GRAD }));
 }
 
-// outline material is shared (back-face, slightly inflated)
-// soft plum instead of near-black, so the line sits gently against pastels
-const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: THEME.world.outline, side: THREE.BackSide });
-const OUTLINE_SCALE = 1.028;
+// Preserve factory callers; paper edges use solid geometry and contact shadows.
+function addOutline(mesh) {
+  mesh.receiveShadow = true;
+  return mesh;
+}
 
-// attach a cartoon outline to a mesh (clones its geometry, inflated & inverted)
-function addOutline(mesh, scale = OUTLINE_SCALE) {
-  const outline = new THREE.Mesh(mesh.geometry, OUTLINE_MAT);
-  outline.scale.setScalar(scale);
-  mesh.add(outline);
-  return outline;
+function collectRuntimeReferences(value, objects, materials, seen = new WeakSet()) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return;
+  if (value.isObject3D) { objects.add(value); return; }
+  if (value.isMaterial) { materials.add(value); return; }
+  if (seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectRuntimeReferences(entry, objects, materials, seen));
+    return;
+  }
+  for (const entry of Object.values(value)) {
+    collectRuntimeReferences(entry, objects, materials, seen);
+  }
+}
+
+function materialBatchKey(material) {
+  const color = material.color?.getHexString?.() || '';
+  const emissive = material.emissive?.getHexString?.() || '';
+  return [
+    material.type, color, emissive, material.emissiveIntensity || 0,
+    material.map?.uuid || '', material.gradientMap?.uuid || '',
+    material.side, material.transparent, material.opacity,
+    material.depthWrite, material.blending, material.vertexColors,
+  ].join('|');
+}
+
+function geometryBatchKey(geometry) {
+  const attributes = Object.entries(geometry.attributes || {})
+    .map(([name, attribute]) => `${name}:${attribute.itemSize}:${attribute.normalized ? 1 : 0}`)
+    .sort()
+    .join(',');
+  return `${geometry.index ? 'indexed' : 'plain'}|${attributes}`;
+}
+
+// Merge only leaf meshes that share one static parent. Parent groups remain
+// intact, so character limbs, home signals, boat motion and editor transforms
+// keep their existing anchors while repeated visual fragments cost one batch.
+function batchStaticMeshTree(root) {
+  if (!root || root.userData.sharedModelResources) return root;
+  stabilizePaperShadows(root);
+  const preservedObjects = new Set();
+  const runtimeMaterials = new Set();
+  root.traverse((object) => {
+    collectRuntimeReferences(object.userData, preservedObjects, runtimeMaterials);
+  });
+
+  const visit = (parent) => {
+    for (const child of [...parent.children]) {
+      if (!child.isMesh) visit(child);
+    }
+    const groups = new Map();
+    for (const child of parent.children) {
+      if (!child.isMesh || child.isInstancedMesh || child.isSkinnedMesh
+          || child.children.length || preservedObjects.has(child)
+          || Array.isArray(child.material) || child.material?.transparent
+          || child.morphTargetInfluences || !child.geometry) continue;
+      const key = [
+        materialBatchKey(child.material), geometryBatchKey(child.geometry),
+        child.renderOrder, child.castShadow ? 1 : 0, child.receiveShadow ? 1 : 0,
+      ].join('::');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(child);
+    }
+
+    for (const siblings of groups.values()) {
+      if (siblings.length < 2) continue;
+      const geometries = siblings.map((mesh) => {
+        mesh.updateMatrix();
+        return mesh.geometry.clone().applyMatrix4(mesh.matrix);
+      });
+      const geometry = mergeGeometries(geometries, false);
+      geometries.forEach((item) => item.dispose());
+      if (!geometry) continue;
+      const material = siblings.find((mesh) => runtimeMaterials.has(mesh.material))?.material
+        || siblings[0].material;
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = 'district-static-batch';
+      mesh.castShadow = siblings[0].castShadow;
+      mesh.receiveShadow = siblings[0].receiveShadow;
+      mesh.renderOrder = siblings[0].renderOrder;
+      siblings.forEach((item) => parent.remove(item));
+      parent.add(mesh);
+    }
+  };
+  visit(root);
+  return root;
 }
 
 function disposeObject(root) {
   // Bundled GLTF instances share resources owned by modelProtoCache.
   // Disposing one clone would invalidate every clone and the prototype.
   if (root?.userData?.sharedModelResources) return;
+  root?.userData?.disposeResources?.();
   const geometries = new Set();
   const materials = new Set();
   root.traverse(obj => {
     if (obj.geometry) geometries.add(obj.geometry);
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     for (const mat of mats) {
-      if (mat && mat !== OUTLINE_MAT) materials.add(mat);
+      if (mat) materials.add(mat);
     }
   });
   geometries.forEach(geometry => geometry.dispose());
@@ -440,6 +539,8 @@ function removeSceneObject(obj) {
 // 14 -> 11.2 (4/5) -> 7.47 (a further 2/3)
 const R = 7.47;
 const TERRAIN_RELIEF = 0.38;
+const SEA_BAND_MIN_Y = -0.70;
+const SEA_BAND_MAX_Y = 0.20;
 
 const skySystem = createSkySystem({
   scene,
@@ -456,16 +557,21 @@ performanceGovernor.attachSkySystem(skySystem);
 const ambientAudio = createAmbientAudio({
   button: document.getElementById('soundToggle'),
 });
+document.addEventListener('village-board-open', () => ambientAudio.playEffect('open'));
+const roseStory = createRoseStory({ onOpen: () => {
+  ambientAudio.playEffect('open');
+  document.dispatchEvent(new Event('rose-story-open'));
+} });
 
 // ---------------------------------------------------------------------------
 // The planet
 // ---------------------------------------------------------------------------
 const planet = new THREE.Mesh(
-  new THREE.SphereGeometry(R, 32, 32),         // fewer segments => chunkier low-poly facets
+  new THREE.SphereGeometry(R, 128, 96),        // Match thin paper paths to the analytic surface.
   new THREE.MeshToonMaterial({
     color: THEME.world.planet,
-    emissive: THEME.world.seaDeep,
-    emissiveIntensity: 0.16,
+    emissive: THEME.world.landDeep,
+    emissiveIntensity: 0.08,
     gradientMap: TOON_GRAD,
   })
 );
@@ -482,6 +588,7 @@ const planet = new THREE.Mesh(
   planet.geometry.computeVertexNormals();
 }
 planet.receiveShadow = true;
+applyPaperSurface(planet.material);
 scene.add(planet);
 addOutline(planet, 1.012); // thin rim so the globe reads as one big cartoon shape
 
@@ -527,10 +634,17 @@ function unregisterZones(zoneArray, list) {
 // compare the target's angular distance against the outline radius at the
 // target's bearing, so arbitrary drawn shapes register correctly.
 function zoneContains(z, target, extraRadius = 0) {
-  if (z.band) return target.y >= z.band.minY - extraRadius && target.y <= z.band.maxY + extraRadius;
-  const ang = Math.acos(Math.max(-1, Math.min(1, target.dot(z.dir))));
-  if (ang > z.radius + extraRadius) return false;      // outside bounding circle
+  if (z.band) {
+    const bounds = z.band.contoured
+      ? oceanBandBounds(Math.atan2(target.z, target.x), z.band.minY, z.band.maxY)
+      : { min: z.band.minY, max: z.band.maxY };
+    return target.y >= bounds.min - extraRadius && target.y <= bounds.max + extraRadius;
+  }
+  const dot = Math.max(-1, Math.min(1, target.dot(z.dir)));
+  const radius = z.radius + extraRadius;
+  if (radius < 0 || (radius < Math.PI && dot < Math.cos(radius))) return false;
   if (!z.poly) return true;
+  const ang = Math.acos(dot);
   const { basis, samples } = z.poly;                   // samples: [bearing, radius] sorted
   const rel = target.clone().sub(z.dir.clone().multiplyScalar(target.dot(z.dir)));
   if (rel.lengthSq() < 1e-12) return true;             // at the center
@@ -582,8 +696,37 @@ function isOnBridgeDir(dir) {
   return isInZone(dir, bridgeZones, 0.01);
 }
 
+function isWaterSurfaceDir(dir) {
+  return isInZone(dir, waterZones, 0) && !isInZone(dir, landZones, 0);
+}
+
 function isInWaterDir(dir) {
-  return isInZone(dir, waterZones, 0) && !isInZone(dir, landZones, 0) && !isOnBridgeDir(dir);
+  return isWaterSurfaceDir(dir) && !isOnBridgeDir(dir);
+}
+
+function terrainCoverageSummary(sampleCount = 4096) {
+  const count = Math.max(256, Math.min(16384, Math.floor(sampleCount)));
+  const direction = new THREE.Vector3();
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  let water = 0;
+  for (let index = 0; index < count; index++) {
+    const y = 1 - (2 * (index + 0.5)) / count;
+    const ring = Math.sqrt(Math.max(0, 1 - y * y));
+    const angle = index * goldenAngle;
+    direction.set(Math.cos(angle) * ring, y, Math.sin(angle) * ring);
+    if (isWaterSurfaceDir(direction)) water++;
+  }
+  const waterPercent = water / count * 100;
+  return {
+    radius: R,
+    diameter: +(R * 2).toFixed(2),
+    circumference: +(Math.PI * R * 2).toFixed(2),
+    surfaceArea: +(Math.PI * R * R * 4).toFixed(2),
+    samples: count,
+    seaBandPercent: +((SEA_BAND_MAX_Y - SEA_BAND_MIN_Y) * 50).toFixed(1),
+    waterPercent: +waterPercent.toFixed(1),
+    landPercent: +(100 - waterPercent).toFixed(1),
+  };
 }
 
 function getSurfaceColliders() {
@@ -733,8 +876,9 @@ function makeSurfaceRibbon(points, { width = 0.8, lift = 0.055, material }) {
   const geo = new THREE.BufferGeometry();
   if (N < 2) return new THREE.Mesh(geo, material);
   const half = (width / 2) / R;                 // angular half-width
-  const pos = new Float32Array(N * 2 * 3);
-  const nor = new Float32Array(N * 2 * 3);
+  const columns = Math.max(2, Math.ceil(width / 0.12) + 1);
+  const pos = new Float32Array(N * columns * 3);
+  const nor = new Float32Array(N * columns * 3);
   for (let i = 0; i < N; i++) {
     const d = dirs[i];
     const prev = dirs[closed ? (i - 1 + N) % N : Math.max(0, i - 1)];
@@ -744,10 +888,10 @@ function makeSurfaceRibbon(points, { width = 0.8, lift = 0.055, material }) {
     if (fwd.lengthSq() < 1e-10) fwd.copy(tangentBasis(d).north);
     fwd.normalize();
     const side = new THREE.Vector3().crossVectors(d, fwd).normalize();
-    for (let k = 0; k < 2; k++) {
-      const e = offsetSurfaceDir(d, side, (k === 0 ? -1 : 1) * half);
+    for (let k = 0; k < columns; k++) {
+      const e = offsetSurfaceDir(d, side, (k / (columns - 1) * 2 - 1) * half);
       const r = terrainRadius(e) + lift;
-      const o = (i * 2 + k) * 3;
+      const o = (i * columns + k) * 3;
       pos[o] = e.x * r; pos[o + 1] = e.y * r; pos[o + 2] = e.z * r;
       nor[o] = e.x; nor[o + 1] = e.y; nor[o + 2] = e.z;
     }
@@ -755,9 +899,11 @@ function makeSurfaceRibbon(points, { width = 0.8, lift = 0.055, material }) {
   const segs = closed ? N : N - 1;
   const idx = [];
   for (let i = 0; i < segs; i++) {
-    const a = i * 2, b = i * 2 + 1;
-    const c = ((i + 1) % N) * 2, d2 = ((i + 1) % N) * 2 + 1;
-    idx.push(a, c, b, b, c, d2);
+    for (let k = 0; k < columns - 1; k++) {
+      const a = i * columns + k, b = a + 1;
+      const c = ((i + 1) % N) * columns + k, d2 = c + 1;
+      idx.push(a, c, b, b, c, d2);
+    }
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
@@ -825,7 +971,7 @@ function makeCapMesh(center, rim, { lift = 0.05, grow = 0, material }) {
   });
   let maxAng = 0;
   for (const d of edge) maxAng = Math.max(maxAng, Math.acos(Math.max(-1, Math.min(1, d.dot(center)))));
-  const rings = Math.max(2, Math.ceil(maxAng / 0.05));
+  const rings = Math.max(2, Math.ceil(maxAng / 0.02));
   const vcount = 1 + rings * M;
   const pos = new Float32Array(vcount * 3);
   const nor = new Float32Array(vcount * 3);
@@ -858,9 +1004,9 @@ function makeCapMesh(center, rim, { lift = 0.05, grow = 0, material }) {
   return mesh;
 }
 
-function makeLatitudeBand(minY, maxY, { lift = 0.064, material } = {}) {
-  const lonSegments = 72;
-  const latSegments = 18;
+function makeLatitudeBand(minY, maxY, { lift = 0.064, material, contoured = false } = {}) {
+  const lonSegments = 128;
+  const latSegments = 48;
   const geo = new THREE.BufferGeometry();
   const rows = latSegments + 1;
   const cols = lonSegments + 1;
@@ -868,10 +1014,11 @@ function makeLatitudeBand(minY, maxY, { lift = 0.064, material } = {}) {
   const nor = new Float32Array(rows * cols * 3);
   const d = new THREE.Vector3();
   for (let iy = 0; iy < rows; iy++) {
-    const y = THREE.MathUtils.lerp(minY, maxY, iy / latSegments);
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
     for (let ix = 0; ix < cols; ix++) {
       const a = (ix / lonSegments) * Math.PI * 2;
+      const bounds = contoured ? oceanBandBounds(a, minY, maxY) : { min: minY, max: maxY };
+      const y = THREE.MathUtils.lerp(bounds.min, bounds.max, iy / latSegments);
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
       d.set(Math.cos(a) * r, y, Math.sin(a) * r).normalize();
       const surface = terrainRadius(d) + lift;
       const o = (iy * cols + ix) * 3;
@@ -939,11 +1086,11 @@ function makeSurfacePatch(rx, rz, color, { opacity = 1, lift = 0.035 } = {}) {
 // readable vertical profile while the grass top keeps it part of the island.
 // Houses overlap the top slightly on purpose, so the pad reads as terrain
 // rather than a separate display plinth.
-function makeVillageTerrace(rx = 1.05, rz = 0.56) {
+function makeVillageTerrace(rx = 1.05, rz = 0.56, accentColor = 0x879a8b) {
   const g = new THREE.Group();
   const skirt = new THREE.Mesh(
     new THREE.CylinderGeometry(1, 1.03, 0.13, 20),
-    toonMat(0x9fa19b)
+    toonMat(0x929b96)
   );
   skirt.scale.set(rx, 1, rz);
   skirt.position.y = 0.065;
@@ -952,12 +1099,32 @@ function makeVillageTerrace(rx = 1.05, rz = 0.56) {
 
   const top = new THREE.Mesh(
     new THREE.CylinderGeometry(0.99, 1, 0.04, 20),
-    toonMat(0xa8b796)
+    toonMat(0xb4c49f)
   );
   top.scale.set(rx, 1, rz);
   top.position.y = 0.145;
   top.receiveShadow = true;
-  g.add(skirt, top);
+  const identityRim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.88, 0.035, 5, 28),
+    toonMat(accentColor),
+  );
+  identityRim.rotation.x = Math.PI / 2;
+  identityRim.scale.set(rx, rz, 1);
+  identityRim.position.y = 0.18;
+  identityRim.castShadow = true;
+
+  // Three broad pavers make the front of every lot readable from the opening
+  // camera without adding another gameplay collider.
+  const paverMat = toonMat(0xd9d3c3);
+  for (let index = -1; index <= 1; index++) {
+    const paver = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.045, 0.16), paverMat);
+    paver.position.set(index * 0.29, 0.19, rz * 0.76);
+    paver.rotation.y = index * 0.06;
+    paver.castShadow = true;
+    paver.receiveShadow = true;
+    g.add(paver);
+  }
+  g.add(skirt, top, identityRim);
   return g;
 }
 
@@ -965,7 +1132,7 @@ function makeWorkPlaza(rx = 0.82, rz = 0.43) {
   const g = new THREE.Group();
   const base = new THREE.Mesh(
     new THREE.CylinderGeometry(1, 1, 0.055, 24),
-    toonMat(0xb4aa92)
+    toonMat(0x687878)
   );
   base.scale.set(rx, 1, rz);
   base.position.y = 0.028;
@@ -973,13 +1140,29 @@ function makeWorkPlaza(rx = 0.82, rz = 0.43) {
 
   // A quiet inner inlay gives the eye a centre without becoming a monument.
   const inlay = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.68, 0.68, 0.018, 24),
+    new THREE.CylinderGeometry(0.76, 0.76, 0.018, 24),
     toonMat(0xc9c0a7)
   );
   inlay.scale.set(rx, 1, rz);
   inlay.position.y = 0.064;
   inlay.receiveShadow = true;
-  g.add(base, inlay);
+
+  const paverGeometry = new THREE.BoxGeometry(0.23, 0.035, 0.10);
+  const pavers = new THREE.InstancedMesh(paverGeometry, toonMat(0xe0d7bf), 6);
+  const paver = new THREE.Object3D();
+  for (let index = 0; index < 6; index++) {
+    const angle = index / 6 * Math.PI * 2;
+    paver.position.set(Math.cos(angle) * rx * 0.80, 0.082, Math.sin(angle) * rz * 0.80);
+    paver.rotation.set(0, -angle, 0);
+    paver.updateMatrix();
+    pavers.setMatrixAt(index, paver.matrix);
+  }
+  pavers.castShadow = true;
+  pavers.receiveShadow = true;
+
+  // Agent state already appears on the operations beacon and in the HUD.
+  // Repeating six coloured nodes here made the centre read as a second dial.
+  g.add(base, inlay, pavers);
   return g;
 }
 
@@ -1318,7 +1501,7 @@ function addAgentHomeFacade(root, ownerKey, kind = 'cottage') {
   const dark = toonMat(0x4b5058);
   const marker = new THREE.Group();
   marker.name = ownerKey + '-home-facade';
-  marker.position.set(0, kind === 'lighthouse' ? 2.45 : 2.18, kind === 'lighthouse' ? 0.79 : 1.69);
+  marker.position.set(0, kind === 'lighthouse' ? 2.45 : 2.18, kind === 'lighthouse' ? 0.79 : 1.80);
   marker.scale.setScalar(kind === 'lighthouse' ? 0.82 : 1);
   const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.52, 0.07), dark);
   plaque.castShadow = true;
@@ -1404,63 +1587,92 @@ function addAgentHomeFacade(root, ownerKey, kind = 'cottage') {
 
 function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '' } = {}) {
   const g = new THREE.Group();
-  // Low, practical modern fishing-village house: white plaster box and a
-  // simple folded metal roof instead of the old fairy-tale cone roof.
+  // Cut-out walls and folded card roofs retain the existing walkable footprint.
   const foundation = new THREE.Mesh(
-    new THREE.BoxGeometry(3.68, 0.30, 3.30),
-    toonMat(0xb9b4aa),
+    new THREE.BoxGeometry(3.68, 0.22, 3.30),
+    toonMat(0xaeb9aa),
   );
   foundation.position.y = 0.15;
   foundation.castShadow = true;
   foundation.receiveShadow = true;
   addOutline(foundation, 1.016);
-  const base = new THREE.Mesh(new THREE.BoxGeometry(3.55, 2.55, 3.18), toonMat(wall));
-  base.position.y = 1.28; base.castShadow = true; base.receiveShadow = true; addOutline(base);
+  const base = makePaperHouseShell(toonMat, { wall, accent: roof });
+  // Coplanar card layers use their baked color separation, avoiding shadow-map
+  // acne on the facade while still casting the house silhouette onto the ground.
+  base.receiveShadow = false;
   const roofMat = toonMat(roof);
-  const roofLeft = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.13, 3.62), roofMat);
+  const roofLeft = makePaperSlab(toonMat, { width: 2.24, length: 3.74, color: roof, depth: 0.06, gap: 0.045, folds: 3 });
   const roofRight = roofLeft.clone();
   roofLeft.position.set(-0.83, 3.02, 0); roofLeft.rotation.z = 0.47;
   roofRight.position.set(0.83, 3.02, 0); roofRight.rotation.z = -0.47;
   [roofLeft, roofRight].forEach(m => { m.castShadow = true; addOutline(m, 1.025); });
+  const paperEdge = toonMat(0xf1eee2);
+  const foundationSheet = makePaperSlab(toonMat, { width: 3.76, length: 3.38, color: 0xb9c8b7, depth: 0.035, gap: 0.012 });
+  foundationSheet.position.y = 0.30;
+  foundationSheet.castShadow = foundationSheet.receiveShadow = true;
+  g.add(foundationSheet);
   const ridge = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.70, 6), roofMat);
   ridge.position.y = 3.53;
   ridge.rotation.x = Math.PI / 2;
   ridge.castShadow = true;
   addOutline(ridge, 1.03);
-  const door = new THREE.Mesh(new THREE.BoxGeometry(0.82, 1.78, 0.08), toonMat(0x8e6b58));
+  const door = makePaperDoor(toonMat, { width: 0.82, height: 1.78, color: roof });
   door.position.set(0, 0.9, 1.63);
-  const frameMat = toonMat(0x8c7465);
-  const leftFrame = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.82, 0.075), frameMat);
-  const rightFrame = leftFrame.clone();
-  leftFrame.position.set(-1.12, 1.45, 1.625);
-  rightFrame.position.set(1.12, 1.45, 1.625);
+  door.receiveShadow = false;
+  const windowTrim = makePaperWindowTrim(toonMat, { accent: roof });
+  windowTrim.receiveShadow = false;
+  g.add(windowTrim);
   const windowMat = new THREE.MeshToonMaterial({
     color: 0xfff0b8,
     emissive: 0xd89a43,
     emissiveIntensity: 0.28,
     gradientMap: TOON_GRAD,
   });
-  const leftWindow = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.62, 0.055), windowMat);
+  const leftWindow = new THREE.Mesh(new THREE.BoxGeometry(0.79, 0.79, 0.055), windowMat);
   const rightWindow = leftWindow.clone();
-  leftWindow.position.set(-1.12, 1.45, 1.675);
-  rightWindow.position.set(1.12, 1.45, 1.675);
-  const sideFrame = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.76, 0.90), frameMat);
-  sideFrame.position.set(1.79, 1.42, 0.2);
-  const sideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.58, 0.72), windowMat);
-  sideWindow.position.set(1.835, 1.42, 0.2);
+  leftWindow.position.set(-1.12, 1.45, 1.525);
+  rightWindow.position.set(1.12, 1.45, 1.525);
+  const sillGeometry = new THREE.BoxGeometry(0.98, 0.08, 0.24);
+  for (const x of [-1.12, 1.12]) {
+    const sill = new THREE.Mesh(sillGeometry, paperEdge);
+    sill.position.set(x, 1.00, 1.74);
+    sill.castShadow = sill.receiveShadow = true;
+    g.add(sill);
+  }
+  const sideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.73, 0.88), windowMat);
+  sideWindow.position.set(1.605, 1.42, 0.2);
+  const oppositeWindow = sideWindow.clone();
+  oppositeWindow.position.x *= -1;
+  const rearWindow = new THREE.Mesh(new THREE.BoxGeometry(1.01, 0.79, 0.055), windowMat);
+  rearWindow.position.set(0, 1.45, -1.525);
   const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.92, 0.34), toonMat(0xa57f70));
   chimney.position.set(1.08, 3.62, -0.25); chimney.castShadow = true; addOutline(chimney, 1.035);
   const stoop = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.12, 0.48), toonMat(0xb8a18b));
   stoop.position.set(0, 0.06, 1.82);
   g.add(
     foundation, base, roofLeft, roofRight, ridge, door,
-    leftFrame, rightFrame, sideFrame, leftWindow, rightWindow, sideWindow,
+    leftWindow, rightWindow, sideWindow, oppositeWindow, rearWindow,
     chimney, stoop,
   );
+  const architecture = makeCottageArchitecture({
+    ownerKey,
+    wallMaterial: toonMat(wall),
+    roofMaterial: roofMat,
+    edgeMaterial: paperEdge,
+    glassMaterial: windowMat,
+  });
+  g.add(architecture);
   g.scale.setScalar(scale);
   g.userData.colliderRadius = 0.27 * scale;
   g.userData.windowMaterials = [windowMat];
-  g.userData.homeLabelOffset = new THREE.Vector3(0, 3.95, 1.62);
+  g.userData.architectureProfile = architecture.userData.architectureProfile;
+  g.userData.paperConstruction = 'layered-cut-card';
+  g.userData.scaleSpec = {
+    doorHeight: 1.78 * scale,
+    footprintWidth: 3.68 * scale,
+    profile: architecture.userData.architectureProfile,
+  };
+  g.userData.homeLabelOffset = new THREE.Vector3(0, ownerKey === 'rodi' ? 4.92 : 4.08, 1.62);
   g.userData.homeFlagOffset = new THREE.Vector3(1.35, 0, 2.25);
   g.userData.doorOffset = new THREE.Vector3(0, 0, 2.15);
   addAgentHomeFacade(g, ownerKey);
@@ -1471,12 +1683,23 @@ function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '
 function makeFishingBoat(color = 0xf2f0e8) {
   const g = new THREE.Group();
   const floatBody = new THREE.Group();
-  const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.38, 1.35, 6), toonMat(color));
-  hull.rotation.x = Math.PI / 2; hull.scale.y = 0.55; hull.position.y = 0.22;
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.12, 1.08), toonMat(0x477c9b));
+  const hull = makePaperRelief(toonMat, { template: 'hull', color, layers: 5, step: 0.055 });
+  hull.rotation.x = Math.PI / 2; hull.position.y = 0.22;
+  const deck = new THREE.Mesh(paperCutGeometry('hull', 0.035), [toonMat(0xf0e9d4), toonMat(0xdbcab7)]);
+  deck.rotation.x = Math.PI / 2;
+  deck.scale.set(0.88, 0.92, 1);
+  deck.position.y = 0.35;
+  deck.receiveShadow = true;
+  floatBody.add(deck);
+  const stripe = new THREE.Mesh(paperCutGeometry('hull', 0.04), [toonMat(0x477c9b), toonMat(0xf4f0e7)]);
+  stripe.rotation.x = Math.PI / 2;
   stripe.position.y = 0.29;
+  stripe.scale.set(0.92, 0.94, 1);
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.38, 0.46), toonMat(0xf7f2df));
   cabin.position.set(0, 0.52, -0.12);
+  const cabinRoof = makePaperSlab(toonMat, { width: 0.56, length: 0.55, color: 0x80b4c1, depth: 0.018, gap: 0.009 });
+  cabinRoof.position.set(0, 0.72, -0.12);
+  floatBody.add(cabinRoof);
   const window = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.04), toonMat(0x79b9d4));
   window.position.set(0, 0.56, 0.13);
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.86, 6), toonMat(0x7e6754));
@@ -1516,6 +1739,144 @@ function makeHarborBuoy() {
   return g;
 }
 
+function makeChannelBeacon(color = 0xe5b94f) {
+  const g = new THREE.Group();
+  const floatBody = new THREE.Group();
+  const dark = toonMat(0x365468);
+  const accent = toonMat(color);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.34, 0.24, 8), accent);
+  base.position.y = 0.12;
+  const bumper = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.055, 5, 12), dark);
+  bumper.rotation.x = Math.PI / 2;
+  bumper.position.y = 0.13;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.055, 0.92, 7), dark);
+  pole.position.y = 0.66;
+  const platform = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.06, 8), accent);
+  platform.position.y = 1.05;
+  const lightMat = new THREE.MeshToonMaterial({
+    color: 0xffe7a0,
+    emissive: 0xffb84d,
+    emissiveIntensity: 0.42,
+    gradientMap: TOON_GRAD,
+  });
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.105, 8, 6), lightMat);
+  lamp.position.y = 1.20;
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.13, 8), dark);
+  cap.position.y = 1.34;
+  [base, bumper, pole, platform, lamp, cap].forEach((mesh) => {
+    mesh.castShadow = true;
+    addOutline(mesh, 1.025);
+    floatBody.add(mesh);
+  });
+  g.add(floatBody);
+  g.userData.floatBody = floatBody;
+  g.userData.motionKind = 'buoy';
+  g.userData.motionPhase = Math.random() * Math.PI * 2;
+  return g;
+}
+
+function makeCargoFerry(color = 0xd98267) {
+  const g = new THREE.Group();
+  const floatBody = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.40, 0.54, 2.05, 6), toonMat(0x365468));
+  hull.rotation.x = Math.PI / 2;
+  hull.scale.set(1.18, 0.72, 0.72);
+  hull.position.y = 0.20;
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.12, 1.52), toonMat(0xe5dcc4));
+  deck.position.y = 0.39;
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.48, 0.52), toonMat(0xf2efe5));
+  cabin.position.set(0, 0.67, 0.43);
+  const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.19, 0.045), toonMat(0x78b5c4));
+  windshield.position.set(0, 0.72, 0.705);
+  const cargoA = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.28, 0.48), toonMat(color));
+  cargoA.position.set(-0.21, 0.58, -0.35);
+  const cargoB = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.28, 0.48), toonMat(0xe0b854));
+  cargoB.position.set(0.21, 0.58, -0.35);
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.36, 7), toonMat(0x6b584d));
+  stack.position.set(0.25, 1.01, 0.39);
+  [hull, deck, cabin, windshield, cargoA, cargoB, stack].forEach((mesh) => {
+    mesh.castShadow = true;
+    addOutline(mesh, 1.025);
+    floatBody.add(mesh);
+  });
+
+  const wakeGeometry = new THREE.BufferGeometry();
+  wakeGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    -0.34, 0.03, -0.80, -0.10, 0.03, -1.92, -0.50, 0.03, -1.72,
+     0.34, 0.03, -0.80,  0.50, 0.03, -1.72,  0.10, 0.03, -1.92,
+  ]), 3));
+  wakeGeometry.computeVertexNormals();
+  const wake = new THREE.Mesh(
+    wakeGeometry,
+    new THREE.MeshBasicMaterial({ color: 0xeaf8f3, transparent: true, opacity: 0.76, side: THREE.DoubleSide }),
+  );
+  g.add(wake, floatBody);
+  g.userData.floatBody = floatBody;
+  g.userData.motionKind = 'boat';
+  g.userData.motionPhase = Math.random() * Math.PI * 2;
+  return g;
+}
+
+function makeVendingMachine() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.56, 1.22, 0.38), toonMat(0x67afa8));
+  body.position.y = 0.61;
+  const displayMat = new THREE.MeshToonMaterial({
+    color: 0xd9f4e8,
+    emissive: 0x78b9a9,
+    emissiveIntensity: 0.16,
+    gradientMap: TOON_GRAD,
+  });
+  const display = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.48, 0.035), displayMat);
+  display.position.set(0, 0.78, 0.207);
+  const controls = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.24, 0.04), toonMat(0xf0d27d));
+  controls.position.set(0.15, 0.39, 0.21);
+  const slot = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, 0.04), toonMat(0x365468));
+  slot.position.set(-0.08, 0.20, 0.21);
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.09, 0.46), toonMat(0xe9e5d8));
+  canopy.position.y = 1.26;
+  const feet = [-0.18, 0.18].map((x) => {
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.24), toonMat(0x52636a));
+    foot.position.set(x, 0.06, 0);
+    return foot;
+  });
+  [body, display, controls, slot, canopy, ...feet].forEach((mesh) => {
+    mesh.castShadow = true;
+    addOutline(mesh, 1.025);
+    g.add(mesh);
+  });
+  return g;
+}
+
+function makeConvexMirror() {
+  const g = new THREE.Group();
+  const poleMat = toonMat(0x53646a);
+  const accentMat = toonMat(0xe77f58);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 1.34, 7), poleMat);
+  pole.position.y = 0.67;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.055, 0.055), poleMat);
+  arm.position.set(0.15, 1.24, 0);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.045, 6, 14), accentMat);
+  rim.position.set(0.31, 1.24, 0.035);
+  const mirrorMat = new THREE.MeshToonMaterial({
+    color: 0xcde8e6,
+    emissive: 0x6f9ea5,
+    emissiveIntensity: 0.10,
+    gradientMap: TOON_GRAD,
+    side: THREE.DoubleSide,
+  });
+  const mirror = new THREE.Mesh(new THREE.CircleGeometry(0.215, 16), mirrorMat);
+  mirror.position.set(0.31, 1.24, 0.04);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 0.12, 7), accentMat);
+  base.position.y = 0.06;
+  [pole, arm, rim, mirror, base].forEach((mesh) => {
+    mesh.castShadow = true;
+    addOutline(mesh, 1.025);
+    g.add(mesh);
+  });
+  return g;
+}
+
 function makeNetRack() {
   const g = new THREE.Group();
   const wood = toonMat(0x8d6b52);
@@ -1538,15 +1899,56 @@ function makeNetRack() {
 
 function makeMarketStall(color = 0xe88768) {
   const g = new THREE.Group();
-  const counter = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.42, 0.48), toonMat(0xb58c68));
+  const wood = toonMat(0x8b6b52);
+  const wall = toonMat(0xe8e3d5);
+  const trim = toonMat(0x53666a);
+  const counter = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.40, 0.54), toonMat(0xb58c68));
   counter.position.y = 0.22;
-  const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.09, 0.68), toonMat(color));
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.08, 1.12, 0.10), wall);
+  back.position.set(0, 0.58, -0.37);
+  const sideLeft = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.88, 0.72), wall);
+  const sideRight = sideLeft.clone();
+  sideLeft.position.set(-0.49, 0.46, -0.04);
+  sideRight.position.set(0.49, 0.46, -0.04);
+  const hatch = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.42, 0.045), toonMat(0x8fb4b8));
+  hatch.position.set(0, 0.67, -0.31);
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.22, 0.075), trim);
+  sign.position.set(0, 1.28, -0.26);
+  const signPaper = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.07, 0.02), toonMat(0xefd477));
+  signPaper.position.set(0, 0, 0.05);
+  sign.add(signPaper);
+  const canopy = new THREE.Group();
   canopy.position.y = 1.03;
+  const canopyColors = [color, 0xf4ead6];
+  for (let index = 0; index < 6; index++) {
+    const strip = makePaperSlab(toonMat, { width: 0.19, length: 0.72, color: canopyColors[index % 2], depth: 0.018, gap: 0.009 });
+    strip.position.x = (index - 2.5) * 0.19;
+    strip.castShadow = true;
+    addOutline(strip, 1.018);
+    canopy.add(strip);
+  }
   [-0.44, 0.44].forEach(x => {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.0, 6), toonMat(0x80634f));
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.0, 6), wood);
     post.position.set(x, 0.52, -0.2); g.add(post);
   });
-  [counter, canopy].forEach(m => { m.castShadow = true; addOutline(m, 1.025); g.add(m); });
+  const tray = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.07, 0.34), toonMat(0x738c92));
+  tray.position.set(0, 0.47, 0.02);
+  const catchMat = toonMat(0x9fc9cc);
+  [-0.24, 0, 0.24].forEach((x, index) => {
+    const catchPiece = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.19, 3, 6), catchMat);
+    catchPiece.rotation.z = Math.PI / 2;
+    catchPiece.rotation.y = index * 0.18;
+    catchPiece.position.set(x, 0.55, 0.03);
+    catchPiece.castShadow = true;
+    g.add(catchPiece);
+  });
+  [counter, back, sideLeft, sideRight, hatch, sign, tray].forEach(m => {
+    m.castShadow = true;
+    m.receiveShadow = m === back || m === sideLeft || m === sideRight;
+    addOutline(m, 1.025);
+    g.add(m);
+  });
+  g.add(canopy);
   g.userData.awning = canopy;
   g.userData.motionPhase = Math.random() * Math.PI * 2;
   return g;
@@ -1554,8 +1956,325 @@ function makeMarketStall(color = 0xe88768) {
 
 function makeFishCrate() {
   const g = new THREE.Group();
-  const crate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.24, 0.38), toonMat(0x82979d));
-  crate.position.y = 0.12; crate.castShadow = true; addOutline(crate, 1.03); g.add(crate);
+  const frame = toonMat(0x5f777d);
+  const slat = toonMat(0x8fa4a7);
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.22, 0.40), frame);
+  crate.position.y = 0.11;
+  crate.castShadow = true;
+  addOutline(crate, 1.03);
+  g.add(crate);
+  for (let index = -1; index <= 1; index++) {
+    const frontSlat = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.16, 0.025), slat);
+    frontSlat.position.set(index * 0.18, 0.12, 0.215);
+    const backSlat = frontSlat.clone();
+    backSlat.position.z = -0.215;
+    g.add(frontSlat, backSlat);
+  }
+  const fishMat = toonMat(0xaed7da);
+  [-0.13, 0.13].forEach((x, index) => {
+    const fish = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.16, 3, 6), fishMat);
+    fish.rotation.z = Math.PI / 2;
+    fish.rotation.y = index ? 0.28 : -0.22;
+    fish.position.set(x, 0.27, 0);
+    fish.castShadow = true;
+    g.add(fish);
+  });
+  return g;
+}
+
+function makeStreetLamp() {
+  const g = new THREE.Group();
+  const metal = toonMat(0x53666a);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.16, 8), toonMat(0x8d9692));
+  base.position.y = 0.08;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 1.65, 8), metal);
+  pole.position.y = 0.88;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.055, 0.055), metal);
+  arm.position.set(0.17, 1.64, 0);
+  const hood = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.16, 8), metal);
+  hood.position.set(0.36, 1.50, 0);
+  hood.rotation.z = Math.PI;
+  const glow = new THREE.MeshToonMaterial({
+    color: 0xffe5a5,
+    emissive: 0xe9a84f,
+    emissiveIntensity: 0.72,
+    gradientMap: TOON_GRAD,
+  });
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.095, 9, 7), glow);
+  bulb.scale.y = 0.82;
+  bulb.position.set(0.36, 1.43, 0);
+  [base, pole, arm, hood, bulb].forEach((mesh) => {
+    mesh.castShadow = true;
+    g.add(mesh);
+  });
+  [pole, arm, hood].forEach((mesh) => addOutline(mesh, 1.024));
+  return g;
+}
+
+function makeWayfinder() {
+  const g = new THREE.Group();
+  const postMat = toonMat(0x53666a);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 1.68, 8), postMat);
+  post.position.y = 0.84;
+  const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.12, 0), toonMat(0xf0d06b));
+  cap.position.y = 1.78;
+  [post, cap].forEach((mesh) => { mesh.castShadow = true; addOutline(mesh, 1.03); g.add(mesh); });
+  const fallbackColors = [0xffd76b, 0x71879e, 0x72c8c5, 0x9188bd, 0xe99591, 0x7f79bd];
+  AGENT_CONFIG.slice(0, 6).forEach((agent, index) => {
+    const side = index % 2 ? -1 : 1;
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(0.54, 0.14, 0.07),
+      toonMat(configHex(agent?.color, fallbackColors[index])),
+    );
+    board.position.set(side * 0.22, 1.46 - index * 0.19, 0);
+    board.rotation.y = side > 0 ? -0.08 : 0.08;
+    board.castShadow = true;
+    addOutline(board, 1.025);
+    const point = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.19, 3), board.material);
+    point.position.set(side * 0.52, board.position.y, 0);
+    point.rotation.z = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    point.castShadow = true;
+    g.add(board, point);
+  });
+  return g;
+}
+
+function makeAgentStation(agentKey = '') {
+  const g = new THREE.Group();
+  const agent = AGENT_CONFIG.find((candidate) => candidate.key === agentKey);
+  const color = configHex(agent?.color, 0x81bfbc);
+  const graphite = toonMat(0x53666a);
+  const timber = toonMat(0x8b725d);
+  const pale = toonMat(0xe9ece7);
+  const accent = toonMat(color);
+
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.43, 0.46, 0.08, 10), accent);
+  pad.scale.z = 0.80;
+  pad.position.y = 0.04;
+  const padTop = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.025, 10), pale);
+  padTop.scale.z = 0.80;
+  padTop.position.y = 0.09;
+  const desk = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.10, 0.24), timber);
+  desk.position.set(0, 0.34, -0.04);
+  const pedestal = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.30, 0.10), graphite);
+  pedestal.position.set(0, 0.18, -0.04);
+  const monitor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.23, 0.055), pale);
+  monitor.position.set(0, 0.56, -0.02);
+  monitor.rotation.x = -0.10;
+  const screen = new THREE.Mesh(
+    new THREE.BoxGeometry(0.25, 0.14, 0.012),
+    new THREE.MeshToonMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.45,
+      gradientMap: TOON_GRAD,
+    }),
+  );
+  screen.position.set(0, 0.56, 0.015);
+  screen.rotation.x = -0.10;
+  const stool = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.18, 8), accent);
+  stool.position.set(0, 0.09, 0.34);
+  const stationMeshes = [pad, padTop, desk, pedestal, monitor, screen, stool];
+  stationMeshes.forEach((mesh) => {
+    mesh.castShadow = true;
+    mesh.receiveShadow = mesh === pad || mesh === padTop;
+    g.add(mesh);
+  });
+  [pad, desk, monitor].forEach((mesh) => addOutline(mesh, 1.025));
+  g.userData.stationAgentKey = agentKey;
+  return g;
+}
+
+function makeHarborCrane() {
+  const g = new THREE.Group();
+  const steel = toonMat(0x426b78);
+  const accent = toonMat(0xe4a24a);
+  const dark = toonMat(0x4f5558);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.20, 10), dark);
+  base.position.y = 0.10;
+  const mast = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.25, 0.18), steel);
+  mast.position.y = 1.28;
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.16, 0.18), steel);
+  boom.position.set(0.60, 2.30, 0);
+  boom.rotation.z = 0.12;
+  const brace = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.10, 0.11), accent);
+  brace.position.set(0.35, 1.82, 0);
+  brace.rotation.z = 0.72;
+  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.02, 6), dark);
+  cable.position.set(1.27, 1.73, 0);
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.028, 6, 14, Math.PI * 1.45), accent);
+  hook.position.set(1.27, 1.17, 0);
+  hook.rotation.z = -0.34;
+  [base, mast, boom, brace, cable, hook].forEach((mesh) => {
+    mesh.castShadow = true;
+    g.add(mesh);
+  });
+  [base, mast, boom, hook].forEach((mesh) => addOutline(mesh, 1.025));
+  return g;
+}
+
+function makeDockBollard() {
+  const g = new THREE.Group();
+  const metal = toonMat(0x59666a);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.12, 8), metal);
+  base.position.y = 0.06;
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.13, 0.36, 8), metal);
+  post.position.y = 0.24;
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.08, 8), toonMat(0xe7b34f));
+  cap.position.y = 0.45;
+  [base, post, cap].forEach((mesh) => { mesh.castShadow = true; g.add(mesh); });
+  addOutline(post, 1.025);
+  return g;
+}
+
+function makeCargoCluster() {
+  const g = new THREE.Group();
+  const crateA = makeFishCrate();
+  crateA.position.set(-0.22, 0, 0.05);
+  crateA.rotation.y = -0.12;
+  const crateB = makeFishCrate();
+  crateB.scale.setScalar(0.76);
+  crateB.position.set(0.30, 0, -0.08);
+  crateB.rotation.y = 0.26;
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.20, 0.48, 10), toonMat(0x927053));
+  barrel.position.set(0.06, 0.24, 0.30);
+  barrel.rotation.z = 0.08;
+  const rope = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.035, 6, 18), toonMat(0xc4a36f));
+  rope.rotation.x = Math.PI / 2;
+  rope.position.set(-0.18, 0.06, -0.32);
+  barrel.castShadow = true;
+  addOutline(barrel, 1.025);
+  g.add(crateA, crateB, barrel, rope);
+  return g;
+}
+
+function makeCivicPavilion() {
+  return makePaperPublicSpace(toonMat, 'garden');
+}
+
+function makeClockKiosk() {
+  const g = new THREE.Group();
+  const dark = toonMat(0x4f5f67);
+  const bodyMat = toonMat(0x6e8aa0);
+  const faceMat = toonMat(0xf0ead7);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.32, 0.18, 8), dark);
+  base.position.y = 0.09;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.38, 1.12, 0.34), bodyMat);
+  body.position.y = 0.72;
+  const crown = makePaperTierRoof(toonMat, { radius: 0.34, height: 0.28, color: 0x6e8aa0 });
+  crown.position.y = 1.28;
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.045, 16), faceMat);
+  face.rotation.x = Math.PI / 2;
+  face.position.set(0, 1.05, 0.19);
+  const handLong = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.025), dark);
+  handLong.position.set(0, 1.10, 0.22);
+  handLong.rotation.z = 0.45;
+  const handShort = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.026, 0.025), dark);
+  handShort.position.set(0.045, 1.05, 0.222);
+  handShort.rotation.z = -0.20;
+  [base, body, crown, face, handLong, handShort].forEach((mesh) => {
+    mesh.castShadow = true;
+    addOutline(mesh, 1.024);
+    g.add(mesh);
+  });
+  return g;
+}
+
+function makeRepairShed() {
+  const g = new THREE.Group();
+  const steel = toonMat(0x426b78);
+  const pale = toonMat(0xd9e0dc);
+  const timber = toonMat(0x8d725b);
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.12, 1.08), toonMat(0x929b99));
+  slab.position.y = 0.06;
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.92, 0.10), steel);
+  back.position.set(0, 0.55, -0.48);
+  const sideA = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.92, 0.95), pale);
+  const sideB = sideA.clone();
+  sideA.position.set(-0.57, 0.55, 0);
+  sideB.position.set(0.57, 0.55, 0);
+  const roofA = makePaperSlab(toonMat, { width: 0.82, length: 1.28, color: 0x426b78, depth: 0.025, gap: 0.016 });
+  const roofB = roofA.clone();
+  roofA.position.set(-0.31, 1.16, -0.02); roofA.rotation.z = 0.36;
+  roofB.position.set(0.31, 1.16, -0.02); roofB.rotation.z = -0.36;
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.12, 0.34), timber);
+  bench.position.set(0, 0.35, -0.27);
+  const cabinet = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.54, 0.28), toonMat(0xe3a34d));
+  cabinet.position.set(0.40, 0.38, -0.28);
+  const doorMat = toonMat(0x6f8890);
+  const doorA = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.72, 0.055), doorMat);
+  const doorB = doorA.clone();
+  doorA.position.set(-0.26, 0.42, 0.49);
+  doorB.position.set(0.26, 0.42, 0.49);
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.12, 0.10), timber);
+  lintel.position.set(0, 0.86, 0.50);
+  const workshopSign = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.22, 0.08), toonMat(0xe7e2d4));
+  workshopSign.position.set(0, 1.02, 0.51);
+  const signMark = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.055, 0.025), toonMat(0xe3a34d));
+  signMark.position.set(0, 0, 0.055);
+  workshopSign.add(signMark);
+  [slab, back, sideA, sideB, roofA, roofB, bench, cabinet, doorA, doorB, lintel, workshopSign].forEach((mesh) => {
+    mesh.castShadow = true;
+    mesh.receiveShadow = mesh === slab;
+    addOutline(mesh, 1.023);
+    g.add(mesh);
+  });
+  return g;
+}
+
+function makeResultBoard() {
+  return villageBoard.createMesh(toonMat);
+}
+
+function makeFerryGate() {
+  const g = new THREE.Group();
+  const metal = toonMat(0x4f666c);
+  const accent = toonMat(0xd6a84e);
+  [-0.42, 0.42].forEach((x) => {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 1.30, 8), metal);
+    post.position.set(x, 0.65, 0);
+    post.castShadow = true;
+    g.add(post);
+  });
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.13, 0.12), metal);
+  beam.position.y = 1.24;
+  const marker = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 7, 18), accent);
+  marker.position.set(0, 1.25, 0.08);
+  [beam, marker].forEach((mesh) => { mesh.castShadow = true; addOutline(mesh, 1.024); g.add(mesh); });
+  return g;
+}
+
+function makePlanterCluster() {
+  const g = new THREE.Group();
+  const stone = toonMat(0x9aa49d);
+  const soil = toonMat(0x6f5f4f);
+  const leafMats = [toonMat(0x5f8b68), toonMat(0x7aa077), toonMat(0x8fad7f)];
+  const ground = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.76, 0.06, 12), toonMat(0xb9c5aa));
+  ground.scale.z = 0.72;
+  ground.position.y = 0.03;
+  ground.receiveShadow = true;
+  g.add(ground);
+  [[-0.38, 0.22], [0.34, 0.20], [0, -0.25]].forEach(([x, z], index) => {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.25, 0.42), stone);
+    box.position.set(x, 0.15, z);
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.04, 0.31), soil);
+    bed.position.set(x, 0.285, z);
+    const plant = new THREE.Mesh(new THREE.IcosahedronGeometry(0.24 + index * 0.025, 1), leafMats[index]);
+    plant.scale.y = 0.78;
+    plant.position.set(x, 0.46, z);
+    box.castShadow = true;
+    plant.castShadow = true;
+    addOutline(box, 1.024);
+    g.add(box, bed, plant);
+  });
+  const marker = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.72, 0.12), toonMat(0x53666a));
+  marker.position.set(0.58, 0.36, -0.18);
+  const markerTop = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.20, 0.08), toonMat(0xe7e2d4));
+  markerTop.position.set(0.48, 0.63, -0.18);
+  marker.castShadow = true;
+  markerTop.castShadow = true;
+  addOutline(markerTop, 1.024);
+  g.add(marker, markerTop);
   return g;
 }
 
@@ -1588,7 +2307,7 @@ function makeTetrapod() {
 function makeLighthouse(ownerKey = '') {
   const g = new THREE.Group();
   const owner = AGENT_CONFIG.find((candidate) => candidate.key === ownerKey);
-  const white = toonMat(ownerKey === 'argos' ? 0xeeeaf2 : 0xfbfaf5);
+  const paperColor = ownerKey === 'argos' ? 0xeeeaf2 : 0xfbfaf5;
   const accent = toonMat(configHex(owner?.color, 0xe5524b));
   const stone = toonMat(0xa8a3a2);
   const stoneTop = toonMat(0xc7c1b3);
@@ -1604,11 +2323,11 @@ function makeLighthouse(ownerKey = '') {
   apronTop.position.y = 0.22;
   const base = new THREE.Mesh(new THREE.CylinderGeometry(1.02, 1.22, 0.48, 12), stone);
   base.position.y = 0.24;
-  const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.92, 4.3, 12), white);
+  const tower = makePaperTower(toonMat, { bottomRadius: 0.92, topRadius: 0.58, height: 4.3, color: paperColor });
   tower.position.y = 2.55;
-  const bandLow = new THREE.Mesh(new THREE.CylinderGeometry(0.84, 0.91, 0.54, 12), accent);
+  const bandLow = makePaperTower(toonMat, { bottomRadius: 0.91, topRadius: 0.84, height: 0.54, color: accent.color, layers: 2 });
   bandLow.position.y = 1.42;
-  const bandHigh = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.72, 0.5, 12), accent);
+  const bandHigh = makePaperTower(toonMat, { bottomRadius: 0.73, topRadius: 0.68, height: 0.5, color: accent.color, layers: 2 });
   bandHigh.position.y = 3.48;
   const gallery = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.88, 0.16, 12), accent);
   gallery.position.y = 4.78;
@@ -1618,9 +2337,9 @@ function makeLighthouse(ownerKey = '') {
   });
   const lanternRoom = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.7, 10), lanternMat);
   lanternRoom.position.y = 5.18;
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(0.72, 0.62, 10), accent);
-  roof.position.y = 5.85;
-  const door = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.18, 0.08), toonMat(0x765a4d));
+  const roof = makePaperTierRoof(toonMat, { radius: 0.72, height: 0.62, color: accent.color, tiers: 6, sides: 10 });
+  roof.position.y = 5.54;
+  const door = makePaperDoor(toonMat, { width: 0.62, height: 1.18, color: accent.color });
   door.position.set(0, 0.86, 0.87);
 
   const rail = new THREE.Group();
@@ -1755,21 +2474,20 @@ function makeCamelliaTree() {
   const canopy = new THREE.Group();
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.15, 0.9, 6), toonMat(0x86664f));
   trunk.position.y = 0.45;
-  const crownMats = [toonMat(0x4f8669), toonMat(0x619577)];
   [[0, 1.24, 0, 0.64], [-0.38, 1.12, 0.06, 0.50], [0.38, 1.13, -0.02, 0.52]].forEach(([x,y,z,s], i) => {
-    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 1), crownMats[i % crownMats.length]);
-    crown.position.set(x,y,z); crown.castShadow = true; addOutline(crown, 1.022); canopy.add(crown);
+    const crown = makePaperCanopy(toonMat, { color: i % 2 ? 0x85b78e : 0x619b79 });
+    crown.scale.setScalar(s);
+    crown.position.set(x,y,z); canopy.add(crown);
   });
-  const bloomMats = [
-    new THREE.MeshBasicMaterial({ color: 0xe7686d }),
-    new THREE.MeshBasicMaterial({ color: 0xf29a8f }),
-  ];
+  const bloomColors = [0xe7686d, 0xf29a8f];
   [
     [-0.40,1.34,0.35],[-0.17,1.53,0.46],[0.12,1.48,0.53],[0.40,1.31,0.34],
     [0.46,1.08,0.35],[0.02,1.12,0.61],[-0.38,1.04,0.42],[0.22,1.65,0.25],
     [-0.28,1.43,-0.39],[0.30,1.38,-0.40],[-0.45,1.16,-0.24],[0.46,1.18,-0.27],
   ].forEach(([x,y,z], i) => {
-    const bloom = new THREE.Mesh(new THREE.IcosahedronGeometry(i % 3 === 0 ? 0.13 : 0.105, 1), bloomMats[i % 2]);
+    const bloom = makePaperRelief(toonMat, { template: 'blossom', color: bloomColors[i % 2], layers: 3, step: 0.06 });
+    bloom.scale.setScalar(i % 3 === 0 ? 0.21 : 0.17);
+    bloom.rotation.y = Math.atan2(x, z);
     bloom.position.set(x,y,z); canopy.add(bloom);
   });
   trunk.castShadow = true; g.add(trunk, canopy);
@@ -1791,18 +2509,14 @@ function makeCoastPine() {
   addOutline(trunk, 1.025);
   g.add(trunk);
 
-  const pineMats = [toonMat(0x456f59), toonMat(0x568268), toonMat(0x638e70)];
   [
-    [-0.38,1.35,0.02,0.64,0.38,0.50],
-    [0.05,1.58,0.00,0.78,0.44,0.58],
-    [0.48,1.72,-0.04,0.62,0.36,0.48],
-    [0.24,2.02,-0.06,0.50,0.32,0.42],
+    [0.02,1.38,0.02,0.74,0.62,0.64],
+    [0.20,1.96,-0.04,0.52,0.48,0.46],
   ].forEach(([x,y,z,sx,sy,sz], i) => {
-    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), pineMats[i % pineMats.length]);
+    const crown = makePaperCanopy(toonMat, { pine: true, color: [0x619b7c, 0x8aba8d][i % 2] });
     crown.position.set(x,y,z);
     crown.scale.set(sx,sy,sz);
     crown.castShadow = true;
-    addOutline(crown, 1.022);
     canopy.add(crown);
   });
   g.add(canopy);
@@ -1821,18 +2535,17 @@ function makeTree() {
   const foliage = new THREE.Group();
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 0.95, 5), toonMat(0xc9a87c));
   trunk.position.y = 0.47;
-  const tone = LEAF_TONES[(Math.random()*LEAF_TONES.length)|0];
+  const tone = LEAF_TONES[0];
   // stacked cones => fuller pine
-  const c1 = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.08, 6), toonMat(tone));
-  const c2 = new THREE.Mesh(new THREE.ConeGeometry(0.56, 0.98, 6), toonMat(tone));
-  const c3 = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.78, 6), toonMat(tone));
+  const c1 = makePaperCanopy(toonMat, { pine: true, color: tone });
+  const c2 = makePaperCanopy(toonMat, { pine: true, color: 0x8db899 });
+  const c3 = makePaperCanopy(toonMat, { pine: true, color: 0xb0ce9d });
+  c1.scale.set(0.8, 0.65, 0.8); c2.scale.set(0.64, 0.55, 0.64); c3.scale.set(0.46, 0.45, 0.46);
   c1.position.y = 1.08; c2.position.y = 1.68; c3.position.y = 2.22;
   trunk.castShadow = true; addOutline(trunk); g.add(trunk);
-  [c1, c2, c3].forEach(m => { m.castShadow = true; addOutline(m); foliage.add(m); });
+  [c1, c2, c3].forEach(m => foliage.add(m));
   g.add(foliage);
-  const scale = 1.12 + Math.random()*0.56;
-  g.scale.setScalar(scale);
-  g.userData.colliderRadius = 0.11 * scale;
+  g.userData.colliderRadius = 0.11;
   g.userData.swayGroup = foliage;
   g.userData.motionPhase = Math.random() * Math.PI * 2;
   return g;
@@ -1840,19 +2553,22 @@ function makeTree() {
 
 function makeRock() {
   const g = new THREE.Group();
-  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.3, 0), toonMat(0x9ea6aa));
-  rock.scale.set(1, 0.7, 1.1); rock.castShadow = true; addOutline(rock);
-  g.add(rock); g.scale.setScalar(0.7 + Math.random()*0.9);
+  const rock = makePaperRelief(toonMat, { template: 'stone', color: 0x9ea6aa, layers: 6, step: 0.10 });
+  rock.rotation.x = -Math.PI / 2;
+  rock.scale.set(0.34, 0.42, 0.70);
+  rock.position.y = 0.035;
+  g.add(rock);
   return g;
 }
 
 const PETAL_TONES = [0xffb3c6, 0xffe9a8, 0xc9b8ff, 0xffc9de, 0xfff5f7];
-function makeFlower() {
+function makeFlower(color = PETAL_TONES[0]) {
   const g = new THREE.Group();
   const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,0.3,4), toonMat(0x9bd49b));
   stem.position.y = 0.15;
-  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09,0),
-    toonMat(PETAL_TONES[(Math.random()*PETAL_TONES.length)|0]));
+  const head = makePaperRelief(toonMat, { template: 'blossom', color, layers: 3 });
+  head.scale.setScalar(0.15);
+  head.rotation.x = -0.6;
   head.position.y = 0.32;
   [stem, head].forEach(m => g.add(m));
   addOutline(head);
@@ -1874,7 +2590,20 @@ function mapForward(x, z) {
     .add(MAP_FRAME.north.clone().multiplyScalar(z))
     .normalize();
 }
-const AGENT_PLAZA_DIR = mapDir(0.02, 0.18);
+const DEFAULT_PLAYER_SPAWN_DIR = mapDir(0, -0.18);
+const PLAYER_CLEARANCE_RADIUS = 0.026;
+// NPC work anchors are separate from the six central dashboard stations. Homes
+// may spread across the harbor districts while operational status remains easy
+// to scan at the civic core.
+const AGENT_DISTRICT_ANCHORS = Object.freeze({
+  rodi: Object.freeze([0, 0.85, 0.52]),
+  jarvis: Object.freeze([-0.76, 0.64, 0.10]),
+  yul: Object.freeze([0.76, 0.64, 0.10]),
+  ludwig: Object.freeze([-0.34, 0.78, -0.52]),
+  anne: Object.freeze([0.55, 0.65, -0.53]),
+});
+const DASHBOARD_VIEW_DIR = mapDir(0, 0.34);
+const DASHBOARD_VIEW_FORWARD = mapForward(0, 1);
 // ===========================================================================
 // EDITABLE OBJECT REGISTRY
 // Point objects (houses, trees, signs, …) are described as plain data so the
@@ -1901,14 +2630,34 @@ const PROP_DEFS = {
     lift: 0.065, collider: 0.13, baseScale: 1.25, label: 'operations-core',
     category: '관제', paletteLabel: '✦ 운영 코어', editableParams: ['scale', 'yaw'],
   },
+  civicPavilion: {
+    make: () => makeCivicPavilion(),
+    lift: 0.055, collider: 0.045, label: 'civic-pavilion',
+    category: '관제', paletteLabel: '◉ 공용 정자', editableParams: ['scale', 'yaw'],
+  },
+  harborShelter: {
+    make: () => makePaperPublicSpace(toonMat, 'harbor'),
+    lift: 0.055, collider: 0, label: 'harbor-shelter',
+    category: '항구', paletteLabel: '⌂ 항구 쉼터', editableParams: ['scale', 'yaw'],
+  },
+  clockKiosk: {
+    make: () => makeClockKiosk(),
+    lift: 0.055, collider: 0.05, label: 'clock-kiosk',
+    category: '관제', paletteLabel: '◷ 시간 키오스크', editableParams: ['scale', 'yaw'],
+  },
+  resultBoard: {
+    make: () => makeResultBoard(),
+    lift: 0.055, collider: 0.10, label: 'result-board',
+    category: '관제', paletteLabel: '▤ 마을 게시판', editableParams: ['scale', 'yaw'],
+  },
   cottage: {
     make: (o) => makeCottage({
       wall: o.wall,
       roof: o.roof,
-      scale: (o.scale ?? 1) * 0.75,
+      scale: (o.scale ?? 1) * 0.92,
       ownerKey: o.ownerKey,
     }),
-    lift: 0.08, collider: 0.27, baseScale: 0.75, scaleInFactory: true, label: 'cottage',
+    lift: 0.08, collider: 0.27, baseScale: 0.92, scaleInFactory: true, label: 'cottage',
     category: '건물', paletteLabel: '🏠 집',
     editableParams: ['variant', 'scale', 'yaw'],
     variants: [
@@ -1921,21 +2670,30 @@ const PROP_DEFS = {
   },
   greenhouse: { make: () => makeGreenhouse(), lift: 0.055, collider: 0.12, label: 'greenhouse',
     category: '건물', paletteLabel: '🏡 비닐하우스', editableParams: ['scale', 'yaw'] },
+  repairShed: { make: () => makeRepairShed(), lift: 0.055, collider: 0.14, label: 'repair-shed',
+    category: '건물', paletteLabel: '▰ 항구 수리소', editableParams: ['scale', 'yaw'] },
   tree:   { make: () => makeTree(), lift: 0.035, collider: 0.12, baseScale: 0.85, label: 'tree',
     category: '자연', paletteLabel: '🌲 나무', editableParams: ['scale', 'yaw'] },
   rock:   { make: () => makeRock(), lift: 0.06, collider: 0, label: 'rock',
     category: '자연', paletteLabel: '🪨 바위', editableParams: ['scale', 'yaw'] },
-  flower: { make: () => makeFlower(), lift: 0.0, collider: 0, label: 'flower',
-    category: '자연', paletteLabel: '🌸 꽃', editableParams: ['scale', 'yaw'] },
+  flower: { make: (o) => makeFlower(o.color ?? PETAL_TONES[0]), lift: 0.0, collider: 0, label: 'flower',
+    category: '자연', paletteLabel: '🌸 꽃', editableParams: ['variant', 'scale', 'yaw'],
+    variants: PETAL_TONES.map((color, index) => ({ name: `꽃 ${index + 1}`, color })) },
   trafficLight: { make: () => makeTrafficLight(), lift: 0.08, collider: 0, baseScale: 1.2, label: 'traffic-light',
     category: '도로변', paletteLabel: '🚦 신호등', editableParams: ['scale', 'yaw'] },
-  busStop: { make: () => makeBusStop(), lift: 0.06, collider: 0.07, baseScale: 1.3, label: 'bus-stop',
+  busStop: { make: () => makeBusStop(), lift: 0.06, collider: 0, baseScale: 1.3, label: 'bus-stop',
     category: '도로변', paletteLabel: '🚏 버스정류장', editableParams: ['scale', 'yaw'] },
   // Slim roadside furniture is decorative, not navigational geometry. Keeping
   // it out of the spherical collider set prevents wandering agents getting
   // pinned between a pole and a building while still leaving houses solid.
   utilityPole: { make: () => makeUtilityPole(), lift: 0.055, collider: 0, label: 'utility-pole',
     category: '도로변', paletteLabel: '🗼 전봇대', editableParams: ['scale', 'yaw'] },
+  streetLamp: { make: () => makeStreetLamp(), lift: 0.055, collider: 0, label: 'street-lamp',
+    category: '도로변', paletteLabel: '💡 항구 가로등', editableParams: ['scale', 'yaw'] },
+  wayfinder: { make: () => makeWayfinder(), lift: 0.055, collider: 0, label: 'wayfinder',
+    category: '관제', paletteLabel: '🧭 공명자 길표지', editableParams: ['scale', 'yaw'] },
+  agentStation: { make: (o) => makeAgentStation(o.agentKey), lift: 0.055, collider: 0, label: 'agent-station',
+    category: '관제', paletteLabel: '▣ 에이전트 작업대', editableParams: ['scale', 'yaw'] },
   guardRail: { make: () => makeGuardRail(), lift: 0.09, collider: 0, label: 'guard-rail',
     category: '도로변', paletteLabel: '🚧 가드레일', editableParams: ['scale', 'yaw'] },
   car: {
@@ -1954,9 +2712,13 @@ const PROP_DEFS = {
     category: '도로변', paletteLabel: '➡️ 화살표 표지판', editableParams: ['scale', 'yaw'] },
   signStop: { make: () => makeRoadSign('stop'), lift: 0.06, collider: 0, label: 'road-sign',
     category: '도로변', paletteLabel: '🛑 정지 표지판', editableParams: ['scale', 'yaw'] },
+  vendingMachine: { make: () => makeVendingMachine(), lift: 0.055, collider: 0, label: 'vending-machine',
+    category: '도로변', paletteLabel: '▣ 항구 자판기', editableParams: ['scale', 'yaw'] },
+  convexMirror: { make: () => makeConvexMirror(), lift: 0.055, collider: 0, label: 'convex-mirror',
+    category: '도로변', paletteLabel: '◉ 곡선 반사경', editableParams: ['scale', 'yaw'] },
   fishingBoat: {
     make: (o) => makeFishingBoat(o.color ?? 0xf2f0e8),
-    lift: 0.115, collider: 0, label: 'fishing-boat',
+    lift: 0.115, collider: 0, baseScale: 1.12, label: 'fishing-boat',
     category: '항구', paletteLabel: '⛵ 어선', editableParams: ['variant', 'scale', 'yaw'],
     variants: [
       { name: '흰색', color: 0xf2f0e8 },
@@ -1966,9 +2728,27 @@ const PROP_DEFS = {
   },
   harborBuoy: { make: () => makeHarborBuoy(), lift: 0.11, collider: 0, label: 'harbor-buoy',
     category: '항구', paletteLabel: '🔴 부표', editableParams: ['scale', 'yaw'] },
+  channelBeacon: {
+    make: (o) => makeChannelBeacon(o.color ?? 0xe5b94f),
+    lift: 0.105, collider: 0, label: 'channel-beacon',
+    category: '항구', paletteLabel: '◇ 항로 표지', editableParams: ['variant', 'scale', 'yaw'],
+    variants: [
+      { name: '황색', color: 0xe5b94f },
+      { name: '산호', color: 0xe87867 },
+    ],
+  },
+  cargoFerry: {
+    make: (o) => makeCargoFerry(o.color ?? 0xd98267),
+    lift: 0.105, collider: 0, label: 'cargo-ferry',
+    category: '항구', paletteLabel: '▰ 화물 페리', editableParams: ['variant', 'scale', 'yaw'],
+    variants: [
+      { name: '산호', color: 0xd98267 },
+      { name: '청록', color: 0x5fa3a0 },
+    ],
+  },
   netRack: { make: () => makeNetRack(), lift: 0.055, collider: 0, label: 'net-rack',
     category: '항구', paletteLabel: '🕸️ 건조 그물', editableParams: ['scale', 'yaw'] },
-  marketStall: { make: (o) => makeMarketStall(o.color ?? 0xe88768), lift: 0.055, collider: 0.07, label: 'market-stall',
+  marketStall: { make: (o) => makeMarketStall(o.color ?? 0xe88768), lift: 0.055, collider: 0, label: 'market-stall',
     category: '항구', paletteLabel: '🏪 어시장 좌판', editableParams: ['variant', 'scale', 'yaw'],
     variants: [
       { name: '산호', color: 0xe88768 },
@@ -1978,6 +2758,14 @@ const PROP_DEFS = {
   },
   fishCrate: { make: () => makeFishCrate(), lift: 0.045, collider: 0, label: 'fish-crate',
     category: '항구', paletteLabel: '🧺 어상자', editableParams: ['scale', 'yaw'] },
+  cargoCluster: { make: () => makeCargoCluster(), lift: 0.045, collider: 0, label: 'cargo-cluster',
+    category: '항구', paletteLabel: '📦 하역 화물', editableParams: ['scale', 'yaw'] },
+  harborCrane: { make: () => makeHarborCrane(), lift: 0.055, collider: 0.08, label: 'harbor-crane',
+    category: '항구', paletteLabel: '🏗️ 항구 크레인', editableParams: ['scale', 'yaw'] },
+  dockBollard: { make: () => makeDockBollard(), lift: 0.055, collider: 0, label: 'dock-bollard',
+    category: '항구', paletteLabel: '⚓ 계류 볼라드', editableParams: ['scale', 'yaw'] },
+  ferryGate: { make: () => makeFerryGate(), lift: 0.055, collider: 0, label: 'ferry-gate',
+    category: '항구', paletteLabel: '⌂ 여객 부두 게이트', editableParams: ['scale', 'yaw'] },
   tetrapod: { make: () => makeTetrapod(), lift: 0.075, collider: 0, label: 'tetrapod',
     category: '항구', paletteLabel: '🪨 테트라포드', editableParams: ['scale', 'yaw'] },
   lighthouse: { make: (o) => makeLighthouse(o.ownerKey), lift: 0.055, collider: 0.22, label: 'lighthouse',
@@ -1986,8 +2774,10 @@ const PROP_DEFS = {
     category: '자연', paletteLabel: '🌺 동백나무', editableParams: ['scale', 'yaw'] },
   coastPine: { make: () => makeCoastPine(), lift: 0.04, collider: 0.10, label: 'coast-pine',
     category: '자연', paletteLabel: '🌲 해안 소나무', editableParams: ['scale', 'yaw'] },
+  planterCluster: { make: () => makePlanterCluster(), lift: 0.035, collider: 0, label: 'planter-cluster',
+    category: '자연', paletteLabel: '▦ 공용 정원', editableParams: ['scale', 'yaw'] },
   terrace: {
-    make: (o) => makeVillageTerrace(o.rx ?? 1.05, o.rz ?? 0.56),
+    make: (o) => makeVillageTerrace(o.rx ?? 1.05, o.rz ?? 0.56, o.accent ?? 0x879a8b),
     lift: 0.045, collider: 0, label: 'village-terrace', flat: true,
     category: '바닥', paletteLabel: '🧱 마을 테라스', editableParams: ['yaw'],
   },
@@ -2050,6 +2840,7 @@ function loadModelProto(file, size, fit = 'y') {
         });
         o.castShadow = true;
       });
+      applyPaperObject(scene);
       const box = new THREE.Box3().setFromObject(scene);
       const dims = box.getSize(new THREE.Vector3());
       const basis = fit === 'max' ? Math.max(dims.x, dims.y, dims.z) : dims.y;
@@ -2083,11 +2874,11 @@ const MODEL_PROPS = {
   windmill:  { file: 'assets/models/hexagon/building_windmill_red.gltf',   size: 3.4,  collider: 0.22, category: '건물',  paletteLabel: '🌬️ 풍차' },
   watermill: { file: 'assets/models/hexagon/building_watermill_blue.gltf', size: 2.4,  collider: 0.20, category: '건물',  paletteLabel: '💧 물레방아' },
   fence:     { file: 'assets/models/hexagon/fence_wood_straight.gltf',     size: 1.25, fit: 'max', collider: 0,    category: '도로변', paletteLabel: '🪵 울타리' },
-  barrel:    { file: 'assets/models/hexagon/barrel.gltf',                  size: 0.62, collider: 0.06, category: '도로변', paletteLabel: '🛢️ 나무통' },
+  barrel:    { file: 'assets/models/hexagon/barrel.gltf',                  size: 0.62, collider: 0,    category: '도로변', paletteLabel: '🛢️ 나무통' },
   waterlily: { file: 'assets/models/hexagon/waterlily_A.gltf',             size: 0.55, fit: 'max', lift: 0.085, collider: 0, category: '자연', paletteLabel: '🪷 수련' },
   lantern:   { file: 'assets/models/halloween/post_lantern.gltf',          size: 1.9,  collider: 0,     category: '도로변', paletteLabel: '🏮 가로등' },
   pumpkin:   { file: 'assets/models/halloween/pumpkin_orange.gltf',        size: 0.42, collider: 0.05, category: '자연',  paletteLabel: '🎃 호박' },
-  bench:     { file: 'assets/models/city/bench.gltf',                      size: 1.15, fit: 'max', collider: 0.06, category: '도로변', paletteLabel: '🪑 벤치' },
+  bench:     { file: 'assets/models/city/bench.gltf',                      size: 1.15, fit: 'max', collider: 0,    category: '도로변', paletteLabel: '🪑 벤치' },
 };
 for (const [key, m] of Object.entries(MODEL_PROPS)) {
   PROP_DEFS[key] = {
@@ -2142,6 +2933,57 @@ function applyPropTransform(item) {
   const def = PROP_DEFS[d.type];
   placeOnSphereFacing(item.mesh, d.dir, propFacing(d.dir, d.yaw || 0), def.lift);
   item.dir = d.dir;
+  if (d.type === 'cottage') conformCottageFoundation(item);
+}
+
+function conformCottageFoundation(item) {
+  const root = item.mesh;
+  root.updateMatrixWorld(true);
+  const perimeter = [];
+  const corners = [[-1.85, -1.66], [1.85, -1.66], [1.85, 1.66], [-1.85, 1.66]];
+  for (let side = 0; side < 4; side++) {
+    const a = corners[side], b = corners[(side + 1) % 4];
+    for (let step = 0; step < 8; step++) {
+      const t = step / 8;
+      const top = new THREE.Vector3(THREE.MathUtils.lerp(a[0], b[0], t), 0.28,
+        THREE.MathUtils.lerp(a[1], b[1], t));
+      const dir = root.localToWorld(top.clone()).normalize();
+      const bottom = root.worldToLocal(dir.multiplyScalar(terrainRadius(dir) + 0.045));
+      // Keep the support below the foundation's top, including uphill edges.
+      bottom.y = Math.min(bottom.y, top.y - 0.025);
+      perimeter.push({ top, bottom });
+    }
+  }
+  const positions = [], colors = [];
+  const shades = [0xb2b9aa, 0xe9e3d2, 0xb2b9aa, 0xe9e3d2].map((c) => new THREE.Color(c));
+  for (let i = 0; i < perimeter.length; i++) {
+    const a = perimeter[i], b = perimeter[(i + 1) % perimeter.length];
+    for (let band = 0; band < 4; band++) {
+      const points = [a.bottom.clone().lerp(a.top, band / 4), b.bottom.clone().lerp(b.top, band / 4),
+        a.bottom.clone().lerp(a.top, (band + 1) / 4), b.bottom.clone().lerp(b.top, (band + 1) / 4)];
+      for (const index of [0, 2, 1, 1, 2, 3]) {
+        positions.push(...points[index].toArray());
+        colors.push(...shades[band].toArray());
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  let skirt = root.userData.foundationSkirt;
+  if (!skirt) {
+    const material = toonMat(0xffffff);
+    material.vertexColors = true;
+    material.side = THREE.DoubleSide;
+    skirt = new THREE.Mesh(geometry, material);
+    skirt.castShadow = skirt.receiveShadow = true;
+    root.add(skirt);
+    root.userData.foundationSkirt = skirt;
+  } else {
+    skirt.geometry.dispose();
+    skirt.geometry = geometry;
+  }
 }
 
 // (re)register an item's collider — and, for bridges, its walkable bridge
@@ -2181,6 +3023,8 @@ function spawnProp(data) {
   if (!def) { console.warn('unknown prop type', data.type); return null; }
   const item = { data: normalizePropData(data), mesh: null, dir: null, collider: null };
   item.mesh = def.make(item.data);
+  batchStaticMeshTree(item.mesh);
+  applyPaperObject(item.mesh);
   // Apply user scale × the def's baseScale on top of the factory's own baked
   // scale — unless the factory already consumed them (cottages) or it's a flat
   // field patch (sized by rx/rz instead).
@@ -2220,17 +3064,96 @@ function clearProps() {
 const PATH_DEFS = {
   road: {
     label: '도로',
-    build(points) {
+    build(points, data = {}) {
       const g = new THREE.Group();
-      // A narrow, unmarked village lane. Removing the bright centre stripe
-      // keeps the eye on the agents and makes the loop read as an old coastal
-      // road instead of a miniature highway.
-      const road = makeCountryRoad(points, { width: 0.86, color: THEME.world.roadAsphalt, lift: 0.095 });
-      g.add(road);
+      // Keep the road close to the v11 walking scale. A narrow edge is enough
+      // to separate it from grass without reading as a raised highway.
+      g.add(makeCountryRoad(points, { width: 0.98, color: 0x99968f, lift: 0.121 }));
+      g.add(makeCountryRoad(points, { width: 0.90, color: THEME.world.roadAsphalt, lift: 0.142 }));
+      if (data.districtId === 'core' && data.id === 'core.promenade') {
+        const center = centroidDir(points);
+        const rim = points.map((p) => offsetSurfaceDir(p,
+          p.clone().sub(center.clone().multiplyScalar(p.dot(center))).normalize(), 0.056));
+        // Fill the old traffic-ring silhouette without changing its safe route.
+        for (const child of g.children.slice()) disposeObject(child);
+        g.clear();
+        g.add(makeCapMesh(center, rim, { lift: 0.139, material: toonMat(0xc7cdbd) }));
+      }
       const walkZones = registerPathZones(
         splineDirs(points, { step: 0.055 }).dirs, 0.09, 'road-walk', 0.055, registerBridgeZone
       );
       return { mesh: g, zones: [], walkZones };   // paths remain walkable over the sea cap
+    },
+  },
+  streetEdge: {
+    label: '도로 연석',
+    build(points, data = {}) {
+      if (data.id === 'core.plaza-edge') return { mesh: new THREE.Group(), zones: [] };
+      return {
+        mesh: makeStreetEdges(points, {
+          radius: R,
+          roadWidth: 0.90,
+          splineDirs,
+          makeSurfaceRibbon,
+          materialFactory: toonMat,
+        }),
+        zones: [],
+      };
+    },
+  },
+  lane: {
+    label: '마을 골목',
+    build(points) {
+      const g = new THREE.Group();
+      g.add(makeCountryRoad(points, { width: 0.78, color: 0x9ca18e, lift: 0.139 }));
+      g.add(makeCountryRoad(points, { width: 0.70, color: 0xc5c8b0, lift: 0.158 }));
+      const walkZones = registerPathZones(
+        splineDirs(points, { step: 0.05 }).dirs, 0.075, 'village-lane', 0.05, registerBridgeZone
+      );
+      return { mesh: g, zones: [], walkZones };
+    },
+  },
+  laneEdge: {
+    label: '골목 연석',
+    build(points) {
+      return {
+        mesh: makeStreetEdges(points, {
+          radius: R,
+          roadWidth: 0.70,
+          splineDirs,
+          makeSurfaceRibbon,
+          materialFactory: toonMat,
+        }),
+        zones: [],
+      };
+    },
+  },
+  hedge: {
+    label: '생울타리',
+    build(points) {
+      return {
+        mesh: makeHedgeLine(points, {
+          radius: R,
+          terrainRadius,
+          splineDirs,
+          materialFactory: toonMat,
+        }),
+        zones: [],
+      };
+    },
+  },
+  quayRail: {
+    label: '부두 난간',
+    build(points) {
+      return {
+        mesh: makeQuayRail(points, {
+          radius: R,
+          terrainRadius,
+          splineDirs,
+          materialFactory: toonMat,
+        }),
+        zones: [],
+      };
     },
   },
   river: {
@@ -2247,7 +3170,7 @@ const PATH_DEFS = {
     label: '흙길',
     build(points) {
       // plain country dirt road — no centerline
-      const mesh = makeCountryRoad(points, { width: 0.78, color: THEME.world.dirt, lift: 0.068 });
+      const mesh = makeCountryRoad(points, { width: 1.0, color: THEME.world.dirt, lift: 0.068 });
       return { mesh, zones: [] };
     },
   },
@@ -2256,8 +3179,8 @@ const PATH_DEFS = {
     build(points) {
       // snow-packed path: bright top over a pale-blue shoulder
       const g = new THREE.Group();
-      const shoulder = makeCountryRoad(points, { width: 1.0, color: THEME.world.snowEdge, lift: 0.062 });
-      const top = makeCountryRoad(points, { width: 0.78, color: THEME.world.snowTop, lift: 0.072 });
+      const shoulder = makeCountryRoad(points, { width: 1.18, color: THEME.world.snowEdge, lift: 0.062 });
+      const top = makeCountryRoad(points, { width: 0.92, color: THEME.world.snowTop, lift: 0.072 });
       g.add(shoulder, top);
       return { mesh: g, zones: [] };
     },
@@ -2282,9 +3205,10 @@ const PATH_DEFS = {
     label: '저위도 바다 링',
     minPoints: 2,
     build() {
-      const zone = registerLatitudeWaterBand(-0.82, 0.28, 'sea-ring');
+      const zone = registerLatitudeWaterBand(SEA_BAND_MIN_Y, SEA_BAND_MAX_Y, 'sea-ring');
+      zone.band.contoured = true;
       const seaMat = makeSeaWaterMat();
-      const mesh = makeLatitudeBand(-0.82, 0.28, { lift: 0.064, material: seaMat });
+      const mesh = makeLatitudeBand(SEA_BAND_MIN_Y, SEA_BAND_MAX_Y, { lift: 0.064, material: seaMat, contoured: true });
       mesh.userData.seaMaterials = [seaMat];
       return {
         mesh,
@@ -2306,9 +3230,12 @@ const PATH_DEFS = {
       const land = makeCapMesh(center, rim, {
         lift: 0.085, material: toonMat(THEME.world.islandGrass),
       });
+      const paperCoast = makeSurfaceRibbon([...rim, rim[0]], {
+        width: 0.075, lift: 0.091, material: toonMat(0x6c9b85),
+      });
       const zone = registerPolyLandZone(center, rim, 'harbor-island');
       const g = new THREE.Group();
-      g.add(shore, land);
+      g.add(shore, land, paperCoast);
       return { mesh: g, zones: [], landZones: [zone] };
     },
   },
@@ -2331,6 +3258,19 @@ const PATH_DEFS = {
       g.userData.seaMaterials = [seaMat];
       const zone = registerPolyWaterZone(center, rim, 'sea');
       return { mesh: g, zones: [zone] };
+    },
+  },
+  openWater: {
+    label: '섬 주변 바다',
+    minPoints: 6,
+    closed: true,
+    build(points) {
+      const { dirs: rim } = splineDirs(points, { step: 0.03, forceClosed: true });
+      const center = centroidDir(rim);
+      const material = makeSeaWaterMat();
+      const mesh = makeCapMesh(center, rim, { lift: 0.073, material });
+      mesh.userData.seaMaterials = [material];
+      return { mesh, zones: [registerPolyWaterZone(center, rim, 'islet-water')] };
     },
   },
   wave: {
@@ -2374,9 +3314,9 @@ const PATH_DEFS = {
       const g = new THREE.Group();
       // Three stepped ribbons form a continuous low-poly seawall with enough
       // height to read as a structure, while preserving the walkable top.
-      g.add(makeCountryRoad(points, { width: 0.78, color: 0x8f9497, lift: 0.078 }));
-      g.add(makeCountryRoad(points, { width: 0.60, color: THEME.world.breakwater, lift: 0.103 }));
-      g.add(makeCountryRoad(points, { width: 0.43, color: 0xd6d1ca, lift: 0.129 }));
+      g.add(makeCountryRoad(points, { width: 1.00, color: 0x8f9497, lift: 0.078 }));
+      g.add(makeCountryRoad(points, { width: 0.80, color: THEME.world.breakwater, lift: 0.103 }));
+      g.add(makeCountryRoad(points, { width: 0.60, color: 0xd6d1ca, lift: 0.129 }));
       const walkZones = registerPathZones(
         splineDirs(points, { step: 0.05 }).dirs, 0.065, 'breakwater-walk', 0.05, registerBridgeZone
       );
@@ -2390,7 +3330,7 @@ const PATH_DEFS = {
         splineDirs(points, { step: 0.05 }).dirs, 0.06, 'market-walk', 0.05, registerBridgeZone
       );
       return {
-        mesh: makeCountryRoad(points, { width: 0.64, color: THEME.world.marketPath, lift: 0.103 }),
+        mesh: makeCountryRoad(points, { width: 0.72, color: THEME.world.marketPath, lift: 0.103 }),
         zones: [], walkZones,
       };
     },
@@ -2401,8 +3341,8 @@ const PATH_DEFS = {
       const g = new THREE.Group();
       // A slim raised boardwalk reads as a deliberate harbor edge. The former
       // 1.6-wide ribbon wrapped too far down the globe and became a brown wall.
-      g.add(makeCountryRoad(points, { width: 0.82, color: 0x75685f, lift: 0.079 }));
-      g.add(makeCountryRoad(points, { width: 0.68, color: THEME.world.harborDeck, lift: 0.094 }));
+      g.add(makeCountryRoad(points, { width: 0.78, color: 0x75685f, lift: 0.079 }));
+      g.add(makeCountryRoad(points, { width: 0.62, color: THEME.world.harborDeck, lift: 0.094 }));
       const deckDirs = splineDirs(points, { step: 0.045 }).dirs;
       const seamStride = Math.max(3, Math.floor(deckDirs.length / 7));
       for (let i = seamStride; i < deckDirs.length - seamStride; i += seamStride) {
@@ -2412,7 +3352,7 @@ const PATH_DEFS = {
         const forward = next.clone().sub(previous);
         forward.sub(dir.clone().multiplyScalar(forward.dot(dir))).normalize();
         const side = new THREE.Vector3().crossVectors(dir, forward).normalize();
-        const half = 0.27 / R;
+        const half = 0.18 / R;
         const across = [
           offsetSurfaceDir(dir, side, -half),
           offsetSurfaceDir(dir, side, half),
@@ -2429,8 +3369,8 @@ const PATH_DEFS = {
     label: '동백 오솔길',
     build(points) {
       const g = new THREE.Group();
-      g.add(makeCountryRoad(points, { width: 0.78, color: THEME.world.camelliaPath, lift: 0.093 }));
-      g.add(makeCountryRoad(points, { width: 0.46, color: THEME.world.dirt, lift: 0.103 }));
+      g.add(makeCountryRoad(points, { width: 0.92, color: THEME.world.camelliaPath, lift: 0.093 }));
+      g.add(makeCountryRoad(points, { width: 0.68, color: THEME.world.dirt, lift: 0.103 }));
       const trail = splineDirs(points, { step: 0.045 }).dirs;
       const petalGeo = new THREE.IcosahedronGeometry(0.038, 0);
       const petalMats = [
@@ -2472,11 +3412,34 @@ const PATH_DEFS = {
     minPoints: 3,
     closed: true,
     build(points) {
-      // ground paint: darker forest-floor green
+      // A restrained darker rim keeps community gardens readable as actual
+      // districts from the dashboard camera instead of another vague tint.
       const { dirs: rim } = splineDirs(points, { step: 0.03, forceClosed: true });
       if (rim.length < 3) return { mesh: new THREE.Group(), zones: [] };
       const center = centroidDir(rim);
-      return { mesh: makeCapMesh(center, rim, { lift: 0.045, material: toonMat(0x7cae76) }), zones: [] };
+      const mesh = new THREE.Group();
+      mesh.add(makeCapMesh(center, rim, { lift: 0.100, grow: 0.012, material: toonMat(0x688c63) }));
+      mesh.add(makeCapMesh(center, rim, { lift: 0.116, material: toonMat(0x7cae76) }));
+      return { mesh, zones: [] };
+    },
+  },
+  courtyard: {
+    label: '건물 앞마당',
+    minPoints: 3,
+    closed: true,
+    build(points) {
+      const { dirs: rim } = splineDirs(points, { step: 0.03, forceClosed: true });
+      if (rim.length < 3) return { mesh: new THREE.Group(), zones: [] };
+      const center = centroidDir(rim);
+      const mesh = new THREE.Group();
+      mesh.add(makeCapMesh(center, rim, {
+        lift: 0.091, grow: 0.010, material: toonMat(0x8f9a94),
+      }));
+      mesh.add(makeCapMesh(center, rim, {
+        lift: 0.098, material: toonMat(0xc8c3ae),
+      }));
+      mesh.userData.districtRole = 'building-frontage';
+      return { mesh, zones: [] };
     },
   },
 };
@@ -2502,10 +3465,11 @@ function spawnPath(data) {
   if (!def) return null;
   const dirs = normalizePathDirs(data);
   if (dirs.length < (def.minPoints || 2)) return null;
-  const { mesh, zones = [], landZones: itemLandZones = [], walkZones = [] } = def.build(dirs);
+  const { mesh, zones = [], landZones: itemLandZones = [], walkZones = [] } = def.build(dirs, data);
+  applyPaperObject(mesh);
   scene.add(mesh);
   const item = {
-    data: { kind: 'path', type: data.type, dirs }, mesh,
+    data: { kind: 'path', type: data.type, dirs, ...pathIdentity(data) }, mesh,
     zones, landZones: itemLandZones, walkZones, isPath: true,
   };
   editablePaths.push(item);
@@ -2526,14 +3490,52 @@ function clearPaths() {
   for (const item of editablePaths.slice()) removePath(item);
 }
 
+function samePathRoute(a, b) {
+  if (a.length !== b.length || a.length < 2) return false;
+  return a.every((dir, i) => dir.angleTo(b[i]) < 0.00015)
+    || a.every((dir, i) => dir.angleTo(b[b.length - 1 - i]) < 0.00015);
+}
+
+// Editor commands treat matching paving and curbs as one street. Low-level
+// spawn/remove stay independent so saved layouts and undo restore verbatim.
+function spawnEditorPath(data) {
+  const item = spawnPath(data);
+  const edgeType = { road: 'streetEdge', lane: 'laneEdge' }[data.type];
+  if (item && edgeType && !editablePaths.some((edge) => edge.data.type === edgeType
+    && samePathRoute(edge.data.dirs, item.data.dirs))) {
+    spawnPath({ kind: 'path', type: edgeType, dirs: item.data.dirs });
+  }
+  return item;
+}
+
+function removeEditorPath(item) {
+  const edgeType = { road: 'streetEdge', lane: 'laneEdge' }[item.data.type];
+  const shared = editablePaths.some((other) => other !== item && other.data.type === item.data.type
+    && samePathRoute(other.data.dirs, item.data.dirs));
+  if (edgeType && !shared) {
+    for (const edge of editablePaths.slice()) {
+      if (edge.data.type === edgeType && samePathRoute(edge.data.dirs, item.data.dirs)) removePath(edge);
+    }
+  }
+  removePath(item);
+}
+
 // serialize / restore the editable layout (props + paths in one array).
 // Positions are saved as unit direction vectors `n: [x,y,z]` — valid anywhere
 // on the planet. (Old x/z village layouts still load; see normalizePropData.)
 const _r4 = (v) => +v.toFixed(4);
+function pathIdentity(data) {
+  const result = {};
+  for (const key of ['id', 'districtId']) {
+    if (typeof data[key] === 'string' && /^[a-z0-9_.-]{1,64}$/.test(data[key])) result[key] = data[key];
+  }
+  return result;
+}
 function serializeLayout() {
   const paths = editablePaths.map(it => ({
     kind: 'path',
     type: it.data.type,
+    ...pathIdentity(it.data),
     n: it.data.dirs.map(d => [_r4(d.x), _r4(d.y), _r4(d.z)]),
   }));
   const props = editables.map(it => {
@@ -2548,8 +3550,8 @@ function currentLayoutAudit() {
     const def = PROP_DEFS[item.data.type] || {};
     const isHome = item.data.type === 'cottage' || item.data.type === 'lighthouse';
     const doorDir = isHome ? homeDoorDir(item) : null;
-    const approachDir = isHome
-      ? offsetSurfaceDir(item.data.dir, propFacing(item.data.dir, item.data.yaw || 0), 0.42)
+    const approachDir = isHome && doorDir
+      ? nearestStreetConnection(item, doorDir)?.dir || null
       : null;
     return {
       type: item.data.type,
@@ -2563,8 +3565,13 @@ function currentLayoutAudit() {
   return auditLayout({
     entries,
     expectedOwners: AGENT_CONFIG.map((agent) => agent.key),
-    requiredTypes: ['opsBeacon'],
+    requiredTypes: [
+      'opsBeacon', 'wayfinder', 'harborCrane',
+      'civicPavilion', 'clockKiosk', 'repairShed', 'ferryGate',
+    ],
     planetRadius: R,
+    spawnN: DEFAULT_PLAYER_SPAWN_DIR.toArray(),
+    spawnClearance: PLAYER_CLEARANCE_RADIUS * R,
   });
 }
 
@@ -2583,9 +3590,19 @@ function buildLayout(layout) {
 }
 
 // --- layout persistence (localStorage + JSON import/export) ----------------
-// Keep the old user-edited layout intact under its former key while the harbor
-// redesign starts from a clean default. Export/import remains compatible.
-const LAYOUT_KEY = 'HandulPlanet_layout_harbor_v3';
+// Keep the old user-edited layouts intact under their former keys while the
+// art-direction pass starts from a clean default. Export/import stays compatible.
+const LAYOUT_KEY = 'HandulPlanet_layout_harbor_v27';
+const LEGACY_LAYOUT_KEYS = Object.freeze([
+  'HandulPlanet_layout_harbor_v26',
+  'HandulPlanet_layout_harbor_v25',
+  'HandulPlanet_layout_harbor_v24',
+  'HandulPlanet_layout_harbor_v23',
+  'HandulPlanet_layout_harbor_v22',
+  'HandulPlanet_layout_harbor_v21',
+  'HandulPlanet_layout_harbor_v20',
+  'HandulPlanet_layout_harbor_v19',
+]);
 const LAYOUT_BACKUP_KEY = 'HandulPlanet_layout_backups_v1';
 const LAYOUT_SCHEMA_VERSION = 2;
 const HOME_PALETTE_MIGRATIONS = Object.freeze({
@@ -2694,6 +3711,141 @@ function migrateHarborSpacing(layout) {
   return layout;
 }
 
+const DISTRICT_RELEASE_PATH_TYPES = new Set([
+  'streetEdge', 'laneEdge', 'hedge', 'quayRail', 'courtyard',
+]);
+
+function pathEndpointsNear(entry, start, end, tolerance = 0.018) {
+  const dirs = normalizePathDirs(entry);
+  if (dirs.length < 2) return false;
+  const startDir = mapDir(...start);
+  const endDir = mapDir(...end);
+  const direct = dirs[0].angleTo(startDir) < tolerance
+    && dirs[dirs.length - 1].angleTo(endDir) < tolerance;
+  const reverse = dirs[0].angleTo(endDir) < tolerance
+    && dirs[dirs.length - 1].angleTo(startDir) < tolerance;
+  return direct || reverse;
+}
+
+function replacePathPoints(entry, points) {
+  entry.n = points.map(([x, z]) => mapDir(x, z).toArray());
+  delete entry.points;
+}
+
+function migrateOpenWorldDistrict(layout) {
+  // v20 was an internal grey-box build. The former storage keys are left
+  // untouched, while the new key gets the final release street boundaries.
+  const migrated = layout.filter((entry) => !(
+    entry?.kind === 'path' && DISTRICT_RELEASE_PATH_TYPES.has(entry.type)
+  ));
+
+  for (const entry of migrated) {
+    if (entry?.kind === 'path' && entry.type === 'road') {
+      if (pathEndpointsNear(entry, [-0.68, 0.05], [0.66, 0.11], 0.035)) {
+        replacePathPoints(entry, HARBOR_MAIN_STREET_POINTS);
+      } else if (pathEndpointsNear(entry, [0, -0.45], [0, 0.46], 0.035)) {
+        replacePathPoints(entry, HARBOR_HARBOR_AXIS_POINTS);
+      }
+    }
+  }
+
+  const marketPaths = migrated.filter((entry) => entry?.kind === 'path' && entry.type === 'market');
+  if (marketPaths.length === 1) replacePathPoints(marketPaths[0], HARBOR_MARKET_POINTS);
+
+  const canonicalShedDir = mapDir(0.78, -0.34);
+  for (const entry of migrated) {
+    if (entry?.kind === 'path' || entry?.type !== 'repairShed' || entry.scale > 0.86) continue;
+    const entryDir = Array.isArray(entry.n)
+      ? new THREE.Vector3(...entry.n).normalize()
+      : mapDir(entry.x || 0, entry.z || 0);
+    if (entryDir.angleTo(canonicalShedDir) < 0.005) entry.scale = 1;
+  }
+
+  const releasePaths = [
+    ...HARBOR_DISTRICT_INFRASTRUCTURE,
+    ...HARBOR_TERRAIN_LAYOUT.filter((entry) => entry.type === 'courtyard'),
+  ];
+  return sanitizeLayout([...migrated, ...releasePaths]) || migrated;
+}
+
+function migratePaperNeighborhoods(layout) {
+  const direction = (entry) => Array.isArray(entry.n)
+    ? new THREE.Vector3(...entry.n).normalize() : mapDir(entry.x, entry.z);
+  const near = (entry, previous) => entry.type === previous.type
+    && direction(entry).angleTo(direction(previous)) < 0.003;
+  const moves = [
+    { type: 'cottage', ownerKey: 'rodi', x: 0, z: 0.54, yaw: 3.14 },
+    { type: 'cottage', ownerKey: 'jarvis', x: -0.52, z: -0.02, yaw: 1.56 },
+    { type: 'cottage', ownerKey: 'yul', x: 0.52, z: 0, yaw: -1.56 },
+    { type: 'cottage', ownerKey: 'ludwig', x: -0.50, z: 0.34, yaw: 1.50 },
+    { type: 'cottage', ownerKey: 'anne', x: 0.48, z: 0.36, yaw: -1.48 },
+    { type: 'coastPine', x: -1.34, z: 0.66, yaw: -0.10 },
+    { type: 'camellia', x: 0.28, z: 1.10, yaw: 0.20 },
+  ];
+  const removed = [
+    { type: 'greenhouse', n: HARBOR_GARDEN_ISLAND_CENTER },
+    { type: 'planterCluster', x: 1.12, z: 0.42 },
+    { type: 'bench', x: -0.46, z: 0.48 },
+    { type: 'streetLamp', x: 0.48, z: -0.12 },
+    { type: 'vendingMachine', x: -0.70, z: -0.26 },
+    { type: 'netRack', x: -0.94, z: -0.32 },
+    { type: 'cargoCluster', x: 0.92, z: -0.31 },
+    { type: 'dockBollard', x: -0.54, z: -0.42 },
+    { type: 'tetrapod', x: 0.76, z: -0.82 },
+    { type: 'bench', n: [0.40, -0.75, -0.52] },
+    { type: 'streetLamp', n: [-0.12, -0.69, -0.72] },
+    { type: 'camellia', n: [-0.20, -0.61, -0.77] },
+  ];
+  const pathMoves = [
+    ['road', [[-0.68, 0.05], [-0.38, 0.08], [0, 0.10], [0.36, 0.07], [0.66, 0.11]], HARBOR_MAIN_STREET_POINTS],
+    ['road', [[0, -0.45], [-0.05, -0.22], [0, 0.10], [-0.07, 0.28], [0, 0.46]], HARBOR_HARBOR_AXIS_POINTS],
+    ['streetEdge', [[-0.68, 0.05], [-0.38, 0.08], [0, 0.10], [0.36, 0.07], [0.66, 0.11]], HARBOR_MAIN_STREET_POINTS],
+    ['streetEdge', [[0, -0.43], [-0.05, -0.22], [0, 0.10], [-0.07, 0.28], [0, 0.46]], HARBOR_HARBOR_AXIS_POINTS],
+    ...['lane', 'laneEdge'].flatMap((type) => [
+      [type, [[-0.30, -0.10], [-0.30, 0.10], [-0.29, 0.34]], HARBOR_WEST_LANE_POINTS],
+      [type, [[0.30, -0.09], [0.30, 0.10], [0.29, 0.35]], HARBOR_EAST_LANE_POINTS],
+    ]),
+    ['hedge', [[-1.08, -0.02], [-0.94, 0.16], [-0.78, 0.32]], HARBOR_DISTRICT_INFRASTRUCTURE.find((e) => e.type === 'hedge').points],
+    ['hedge', [[0.78, 0.32], [0.94, 0.16], [1.08, -0.02]], HARBOR_DISTRICT_INFRASTRUCTURE.filter((e) => e.type === 'hedge')[1].points],
+    ['grass', [[0.72, 0.24], [1.14, 0.24], [1.16, 0.62], [0.76, 0.66]], HARBOR_TERRAIN_LAYOUT.find((e) => e.type === 'grass').points],
+    ['courtyard', [[-0.94, -0.02], [-0.42, -0.08], [-0.34, 0.48], [-0.82, 0.62]], HARBOR_TERRAIN_LAYOUT.find((e) => e.type === 'courtyard').points],
+    ['courtyard', [[0.42, -0.08], [0.94, -0.02], [0.82, 0.62], [0.34, 0.48]], HARBOR_TERRAIN_LAYOUT.filter((e) => e.type === 'courtyard')[1].points],
+  ];
+  return layout.filter((entry) => entry.kind === 'path' || !removed.some((old) => near(entry, old)))
+    .map((source) => {
+      const entry = { ...source };
+      if (entry.kind === 'path') {
+        const dirs = normalizePathDirs(entry);
+        for (const [type, before, after] of pathMoves) {
+          if (entry.type !== type || dirs.length !== before.length) continue;
+          if (dirs.every((d, i) => d.angleTo(mapDir(...before[i])) < 0.003)) {
+            replacePathPoints(entry, after);
+            break;
+          }
+        }
+        // The rear coastal path keeps its authored spherical samples.
+        if (entry.type === 'lane' && dirs.length === 6
+            && dirs[0].angleTo(mapDir(-0.54, 0.32)) < 0.003) {
+          entry.n = dirs.map((d, i) => i === 0 ? mapDir(-0.72, 0.33).toArray() : d.toArray());
+          delete entry.points;
+        }
+        return entry;
+      }
+      const old = moves.find((candidate) => near(entry, candidate)
+        && (!candidate.ownerKey || entry.ownerKey === candidate.ownerKey));
+      if (!old) return entry;
+      const next = HARBOR_FRONT_LAYOUT.find((candidate) => candidate.type === old.type
+        && (!old.ownerKey || candidate.ownerKey === old.ownerKey));
+      const offset = wrappedAngle((entry.yaw || 0) - (Array.isArray(entry.n)
+        ? canonicalMapYaw(old.x, old.z, old.yaw) : old.yaw));
+      entry.n = mapDir(next.x, next.z).toArray();
+      entry.yaw = wrappedAngle(canonicalMapYaw(next.x, next.z, next.yaw) + offset);
+      delete entry.x;
+      delete entry.z;
+      return entry;
+    });
+}
+
 // Validate & clamp an untrusted layout (imported JSON / localStorage) into
 // entries that are guaranteed safe to spawn. Invalid entries are dropped, so
 // buildLayout can never crash halfway and leave a half-cleared scene. Returns
@@ -2728,7 +3880,7 @@ function sanitizeLayout(raw) {
           pts.push([num(p[0], -3.2, 3.2, 0), num(p[1], -2.4, 2.4, 0)]);   // legacy map pt
         }
       }
-      if (pts.length >= (PATH_DEFS[e.type].minPoints || 2)) out.push({ kind: 'path', type: e.type, n: pts });
+      if (pts.length >= (PATH_DEFS[e.type].minPoints || 2)) out.push({ kind: 'path', type: e.type, n: pts, ...pathIdentity(e) });
     } else {
       if (!PROP_DEFS[e.type]) continue;
       const d = {
@@ -2744,11 +3896,14 @@ function sanitizeLayout(raw) {
         d.z = num(e.z, -2.4, 2.4, 0);
       }
       // cosmetic extras pass through only as finite numbers
-      for (const k of ['wall', 'roof', 'color', 'len']) {
+      for (const k of ['wall', 'roof', 'color', 'accent', 'len']) {
         if (typeof e[k] === 'number' && isFinite(e[k])) d[k] = e[k];
       }
       if (typeof e.ownerKey === 'string' && /^[a-z0-9_-]{1,32}$/i.test(e.ownerKey)) {
         d.ownerKey = e.ownerKey;
+      }
+      if (typeof e.agentKey === 'string' && /^[a-z0-9_-]{1,32}$/i.test(e.agentKey)) {
+        d.agentKey = e.agentKey;
       }
       if (d.len !== undefined) d.len = num(d.len, 0.8, 8, 2.95);
       for (const k of ['rx', 'rz']) d[k] = num(e[k], 0.1, 3, undefined);
@@ -2764,16 +3919,36 @@ function sanitizeLayout(raw) {
 // (function declaration so it's hoisted for the boot-time buildLayout call.)
 function loadSavedLayout() {
   try {
-    const raw = localStorage.getItem(LAYOUT_KEY);
+    let sourceKey = LAYOUT_KEY;
+    let raw = localStorage.getItem(sourceKey);
+    if (!raw) {
+      sourceKey = LEGACY_LAYOUT_KEYS.find((key) => localStorage.getItem(key)) || '';
+      raw = sourceKey ? localStorage.getItem(sourceKey) : null;
+    }
     if (!raw) return null;
-    const clean = sanitizeLayout(JSON.parse(raw));
+    let clean = sanitizeLayout(JSON.parse(raw));
     if (!clean) return null;
     // Layouts created before the operations view existed keep every user
     // placement; only the missing release-critical core is migrated in.
     if (!clean.some((entry) => entry?.type === 'opsBeacon')) {
       clean.push({ type: 'opsBeacon', x: 0.02, z: 0.18, yaw: 0, scale: 1 });
     }
-    return clean;
+    if (sourceKey !== LAYOUT_KEY) {
+      if (sourceKey !== 'HandulPlanet_layout_harbor_v26') {
+        if (!['HandulPlanet_layout_harbor_v21', 'HandulPlanet_layout_harbor_v22', 'HandulPlanet_layout_harbor_v23', 'HandulPlanet_layout_harbor_v24', 'HandulPlanet_layout_harbor_v25'].includes(sourceKey)) {
+          clean = migrateOpenWorldDistrict(clean);
+        }
+        if (!['HandulPlanet_layout_harbor_v22', 'HandulPlanet_layout_harbor_v23', 'HandulPlanet_layout_harbor_v24', 'HandulPlanet_layout_harbor_v25'].includes(sourceKey)) clean = migratePaperNeighborhoods(clean);
+        if (!['HandulPlanet_layout_harbor_v23', 'HandulPlanet_layout_harbor_v24', 'HandulPlanet_layout_harbor_v25'].includes(sourceKey)) clean = spreadWorldNeighborhoods(clean);
+        clean = migrateRoadJunctions(clean);
+        if (sourceKey !== 'HandulPlanet_layout_harbor_v25') clean = migrateSharedHarbor(clean);
+        clean = migrateVillageBoard(clean);
+      }
+      clean = migrateSpatialStructure(clean);
+      try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(clean)); } catch (_) { /* optional migration */ }
+    }
+    clean = migrateSavedComposition(clean, raw);
+    return clean.filter((entry) => !isRetiredOceanTrail(entry));
   } catch (e) { /* corrupt -> fall back to default */ }
   return null;
 }
@@ -2797,7 +3972,7 @@ function notifyLayoutHistory() {
 function storeLayoutSnapshot(snap) {
   try {
     localStorage.setItem(LAYOUT_KEY, snap);
-    notifyLayoutPersistence(true, '저장됨');
+    notifyLayoutPersistence(true, '이 브라우저에 저장됨');
     return true;
   } catch (error) {
     console.warn('레이아웃 저장 실패:', error);
@@ -2816,13 +3991,15 @@ function saveLayout({ recordHistory = true, clearRedo = true } = {}) {
     notifyLayoutPersistence(false, '저장 실패 · 배치를 직렬화할 수 없습니다');
     return false;
   }
-  if (recordHistory && lastLayoutSnap !== null && snap !== lastLayoutSnap) {
+  const changed = lastLayoutSnap !== null && snap !== lastLayoutSnap;
+  if (recordHistory && changed) {
     undoStack.push(lastLayoutSnap);
     if (undoStack.length > 30) undoStack.shift();
     if (clearRedo) redoStack.length = 0;
   }
   lastLayoutSnap = snap;
   const stored = storeLayoutSnapshot(snap);
+  if (stored && changed) ambientAudio.playEffect('confirm');
   notifyLayoutHistory();
   notifyLayoutQuality();
   return stored;
@@ -2962,12 +4139,9 @@ const poleRose = (() => {
 
   // A pale plinth and gold rim make the tiny landmark readable against either
   // grass or sea when it reaches the planet's silhouette.
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.72, 0.78, 0.14, 20),
-    toonMat(THEME.world.snowTop),
-  );
-  base.position.y = 0.07; base.castShadow = true; base.receiveShadow = true;
-  addOutline(base, 1.025);
+  const base = makePaperTierRoof(toonMat, { radius: 0.78, height: 0.15,
+    color: THEME.world.snowTop, tiers: 3, sides: 20 });
+  base.receiveShadow = false;
   const rim = new THREE.Mesh(
     new THREE.TorusGeometry(0.64, 0.025, 6, 24),
     new THREE.MeshBasicMaterial({ color: THEME.world.roseGold }),
@@ -2976,39 +4150,10 @@ const poleRose = (() => {
   rim.position.y = 0.155;
   g.add(base, rim);
 
-  const stem = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.045, 0.062, 1.42, 7),
-    toonMat(THEME.world.roseStem),
-  );
-  stem.position.y = 0.88; stem.castShadow = true;
-  g.add(stem);
-  // two leaves on the stem
-  [[0.20, 0.72, -0.5], [-0.18, 1.08, 0.45]].forEach(([x, y, tilt]) => {
-    const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.105, 8, 6), toonMat(THEME.world.roseLeaf));
-    leaf.scale.set(1.7, 0.45, 0.8);
-    leaf.position.set(x, y, 0);
-    leaf.rotation.z = tilt;
-    leaf.castShadow = true;
-    g.add(leaf);
-  });
-  // the bloom: deep-red core wrapped in a ring of petals
-  const head = new THREE.Group();
-  head.position.y = 1.70;
-  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.18, 1), toonMat(THEME.world.roseCore));
-  core.castShadow = true; addOutline(core);
-  head.add(core);
-  const petalMat = toonMat(THEME.world.rosePetal);
-  for (let i = 0; i < 7; i++) {
-    const a = (i / 7) * Math.PI * 2;
-    const petal = new THREE.Mesh(new THREE.SphereGeometry(0.135, 9, 7), petalMat);
-    petal.scale.set(1, 1.3, 0.55);
-    petal.position.set(Math.cos(a) * 0.145, 0.035, Math.sin(a) * 0.145);
-    petal.rotation.y = -a;
-    petal.rotation.x = 0.35;         // petals open outward
-    petal.castShadow = true;
-    head.add(petal);
-  }
-  g.add(head);
+  const flower = makePaperRose(toonMat, { petal: THEME.world.rosePetal,
+    core: THEME.world.roseCore, leaf: THEME.world.roseLeaf, stem: THEME.world.roseStem });
+  const head = flower.userData.roseHead;
+  g.add(flower);
 
   // The Little Prince's glass globe: deliberately light and graphic, not a
   // realistic refractive shader. It catches the sky without muddying the rose.
@@ -3074,134 +4219,546 @@ function sphericalArc(centerValues, radius, from, to, segments = 8) {
 
 const HARBOR_SEA_CENTER = [0, -0.42, 0.91];
 const HARBOR_FRONT_ISLAND_POINTS = [
-  [-1.78, 0.70], [-1.82, 0.30], [-1.58, 0.02], [-1.08, -0.18],
-  [-0.48, -0.25], [0, -0.27], [0.48, -0.25], [1.08, -0.18],
-  [1.58, 0.02], [1.82, 0.30], [1.78, 0.70], [1.10, 1.02],
-  [0, 1.16], [-1.10, 1.02], [-1.78, 0.70],
+  [-1.48, 0.72], [-1.52, 0.28], [-1.34, -0.08], [-0.98, -0.31],
+  [-0.48, -0.42], [0, -0.45], [0.48, -0.42], [0.98, -0.31],
+  [1.34, -0.08], [1.52, 0.28], [1.48, 0.72], [1.02, 1.02],
+  [0, 1.18], [-1.02, 1.02], [-1.48, 0.72],
 ];
+// Two overlapping land masks pull the inhabited hemisphere down around the
+// harbor without asking the cap triangulator to fill one deeply concave U.
+// Their inner seams sit below roads, terraces and working-harbor dressing.
+const HARBOR_WEST_PENINSULA_POINTS = [
+  [-1.40, 0.48], [-1.66, 0.18], [-1.68, -0.24], [-1.48, -0.56],
+  [-1.10, -0.72], [-0.72, -0.60], [-0.58, -0.40], [-0.88, -0.24],
+  [-1.24, -0.02], [-1.40, 0.48],
+];
+const HARBOR_EAST_PENINSULA_POINTS = [
+  [1.32, 0.50], [1.62, 0.25], [1.70, -0.16], [1.52, -0.52],
+  [1.16, -0.72], [0.78, -0.62], [0.60, -0.42], [0.88, -0.24],
+  [1.24, -0.02], [1.32, 0.50],
+];
+const HARBOR_GARDEN_ISLAND_CENTER = mapDir(1.70, 0.72).toArray();
+const HARBOR_GARDEN_ISLAND_POINTS = sphericalRing(HARBOR_GARDEN_ISLAND_CENTER, 0.095, 16, Math.PI / 16);
+const HARBOR_REAR_LIGHTHOUSE_DIR = new THREE.Vector3(0, -0.505, -0.863).normalize();
+const HARBOR_REAR_LIGHTHOUSE_APPROACH = offsetSurfaceDir(
+  HARBOR_REAR_LIGHTHOUSE_DIR,
+  propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI),
+  0.28,
+).toArray();
+const HARBOR_MAIN_STREET_POINTS = [
+  [-0.86, 0.08], [-0.38, 0.08], [0, 0.10], [0.36, 0.07], [0.74, 0.10],
+];
+const HARBOR_HARBOR_AXIS_POINTS = [
+  [0, -0.45], [-0.05, -0.22], [0, 0.10], [-0.07, 0.42], [-0.08, 0.80],
+];
+const HARBOR_MARKET_POINTS = [
+  [-0.92, -0.28], [-0.48, -0.30], [0, -0.31], [0.48, -0.30], [0.92, -0.28],
+];
+const HARBOR_WEST_LANE_POINTS = [[-0.70, 0.08], [-0.72, 0.33], [-0.88, 0.64]];
+const HARBOR_EAST_LANE_POINTS = [[0.65, 0.10], [0.85, 0.34], [1.04, 0.64]];
 const HARBOR_TERRAIN_LAYOUT = [
   // A continuous low-latitude ocean band makes the land read as an island
   // from every orbit angle. Polygon land masks carve out the village and cape.
   { kind: 'path', type: 'seaRing', n: [[0, 1, 0], [0, 0, 1]] },
   { kind: 'path', type: 'island', points: HARBOR_FRONT_ISLAND_POINTS },
+  { kind: 'path', type: 'island', points: HARBOR_WEST_PENINSULA_POINTS },
+  { kind: 'path', type: 'island', points: HARBOR_EAST_PENINSULA_POINTS },
+  { kind: 'path', type: 'island', n: HARBOR_GARDEN_ISLAND_POINTS },
   { kind: 'path', type: 'island', n: sphericalRing([0, -0.578, -0.816], 0.46, 20, Math.PI / 20) },
   // Pale foam traces the actual island shoreline; inner bands keep the flat,
   // graphic water treatment from the moodboard.
   { kind: 'path', type: 'wave', points: HARBOR_FRONT_ISLAND_POINTS },
-  { kind: 'path', type: 'wave', n: sphericalArc(HARBOR_SEA_CENTER, 0.34, -1.22, 1.15, 8) },
-  { kind: 'path', type: 'wave', n: sphericalArc(HARBOR_SEA_CENTER, 0.66, -1.02, 1.20, 8) },
-  // One continuous loop: front village → east transition → rear cape → west
-  // transition → front. The first and last point are identical: no dead end.
-  { kind: 'path', type: 'road', points: [
-    [-1.72, 0.08], [-1.20, 0.18], [-0.62, 0.24], [0, 0.20], [0.62, 0.24], [1.20, 0.18], [1.72, 0.08],
-    [0.966, 0.150, 0.211], [1, 0, 0], [0.866, -0.289, -0.408], [0.5, -0.501, -0.707],
-    [0, -0.578, -0.816], [-0.5, -0.501, -0.707], [-0.866, -0.289, -0.408], [-1, 0, 0],
-    [-0.966, 0.150, 0.211], [-1.72, 0.08],
+  { kind: 'path', type: 'wave', points: [
+    [-1.48, 0.36], [-1.66, 0.06], [-1.63, -0.34], [-1.38, -0.62], [-1.03, -0.72], [-0.72, -0.58],
   ] },
-  { kind: 'path', type: 'deck', points: [[-1.38, -0.36], [-0.78, -0.43], [0, -0.46], [0.78, -0.42], [1.30, -0.33]] },
-  { kind: 'path', type: 'market', points: [[-1.35, 0.02], [-0.82, -0.12], [-0.20, -0.18], [0.42, -0.16], [1.10, -0.04]] },
+  { kind: 'path', type: 'wave', points: [
+    [1.40, 0.40], [1.66, 0.12], [1.64, -0.30], [1.43, -0.60], [1.12, -0.72], [0.78, -0.60],
+  ] },
+  { kind: 'path', type: 'wave', n: HARBOR_GARDEN_ISLAND_POINTS },
+  // One shared garden gives the east work street a public destination. It is
+  // deliberately attached to the street instead of floating in spare lawn.
+  { kind: 'path', type: 'grass', points: [
+    [1.05, 0.64], [1.50, 0.60], [1.48, 0.94], [1.08, 1.00],
+  ] },
+  { kind: 'path', type: 'courtyard', points: [
+    [-1.28, -0.12], [-0.82, -0.16], [-0.66, 0.22], [-1.16, 0.28],
+  ] },
+  { kind: 'path', type: 'courtyard', points: [
+    [0.68, -0.18], [1.15, -0.18], [1.22, 0.22], [0.74, 0.28],
+  ] },
+  // A short cross street and a harbor axis form the readable town structure.
+  // Two narrower work lanes hold real building frontages; home approaches are
+  // generated from each door to the nearest street below.
+  { kind: 'path', type: 'road', points: HARBOR_MAIN_STREET_POINTS },
+  { kind: 'path', type: 'road', points: HARBOR_HARBOR_AXIS_POINTS },
+  { kind: 'path', type: 'lane', points: HARBOR_WEST_LANE_POINTS },
+  { kind: 'path', type: 'lane', points: HARBOR_EAST_LANE_POINTS },
+  // A single coastal service lane gives the rear lighthouse a land route. It
+  // ends at the destination instead of circling the whole globe as decoration.
+  { kind: 'path', type: 'lane', n: [
+    mapDir(-0.72, 0.33).toArray(), [-0.966, 0.150, 0.211], [-1, 0, 0],
+    [-0.866, -0.289, -0.408], [-0.5, -0.501, -0.707], HARBOR_REAR_LIGHTHOUSE_APPROACH,
+  ] },
+  { kind: 'path', type: 'deck', points: [[-1.28, -0.38], [-0.72, -0.42], [0, -0.44], [0.74, -0.42], [1.30, -0.37]] },
+  { kind: 'path', type: 'deck', points: [[-0.28, -0.41], [-0.30, -0.68]] },
+  { kind: 'path', type: 'deck', points: [[0.62, -0.40], [0.65, -0.61]] },
+  { kind: 'path', type: 'deck', points: [[1.38, 0.62], [1.52, 0.67], [1.66, 0.71]] },
+  { kind: 'path', type: 'market', points: HARBOR_MARKET_POINTS },
   // Two embracing arms leave a clear harbor mouth instead of closing the bay.
-  { kind: 'path', type: 'breakwater', points: [[-1.42, -0.26], [-1.50, -0.50], [-1.30, -0.72], [-0.94, -0.88], [-0.58, -0.94]] },
-  { kind: 'path', type: 'breakwater', points: [[1.42, -0.26], [1.50, -0.50], [1.30, -0.72], [0.94, -0.88], [0.58, -0.94]] },
+  { kind: 'path', type: 'breakwater', points: [[-1.38, -0.39], [-1.50, -0.57], [-1.39, -0.75], [-1.10, -0.88], [-0.72, -0.94]] },
+  { kind: 'path', type: 'breakwater', points: [[1.40, -0.38], [1.53, -0.55], [1.42, -0.74], [1.12, -0.88], [0.76, -0.94]] },
   { kind: 'path', type: 'camellia', n: [
     mapDir(1.45, 0.28).toArray(), [0.9659, 0.1496, 0.2112], [0.8660, -0.2890, -0.4080],
     [0.5, -0.5006, -0.7067], [0, -0.578, -0.816],
   ] },
 ];
 
+// Repeated boundaries are infrastructure, not decorative clutter. They turn
+// the road ribbons into one readable street while leaving doors and the boat
+// gate open. All pieces remain editable paths and migrate with v19/v20 layouts.
+const HARBOR_DISTRICT_INFRASTRUCTURE = [
+  { kind: 'path', type: 'streetEdge', points: HARBOR_MAIN_STREET_POINTS },
+  { kind: 'path', type: 'streetEdge', points: HARBOR_HARBOR_AXIS_POINTS },
+  { kind: 'path', type: 'laneEdge', points: HARBOR_WEST_LANE_POINTS },
+  { kind: 'path', type: 'laneEdge', points: HARBOR_EAST_LANE_POINTS },
+  { kind: 'path', type: 'hedge', points: [[-1.22, 0.35], [-1.06, 0.39], [-0.90, 0.42]] },
+  { kind: 'path', type: 'hedge', points: [[1.12, 0.36], [1.28, 0.39], [1.40, 0.45]] },
+  { kind: 'path', type: 'quayRail', points: [[-1.20, -0.44], [-0.88, -0.45], [-0.52, -0.45]] },
+  { kind: 'path', type: 'quayRail', points: [[0.18, -0.45], [0.66, -0.45], [1.20, -0.43]] },
+];
+
 const HARBOR_FRONT_LAYOUT = [
-  // One shared work yard is the compositional centre and the destination for
-  // active front-side agents. It replaces several decorative props.
-  { type: 'workPlaza', x: 0.02, z: 0.18, yaw: -0.05, rx: 0.82, rz: 0.43 },
-  { type: 'opsBeacon', x: 0.02, z: 0.18, yaw: 0.0, scale: 1.0 },
-  // One rear landing and two side shelves create a wide 1 + 2 + 2 village.
-  // The open wedges between them preserve clear views from the operations core.
-  { type: 'terrace', x: 0, z: 0.98, yaw: 0, rx: 0.54, rz: 0.34 },
-  { type: 'terrace', x: 0.82, z: 0.52, yaw: -0.08, rx: 0.46, rz: 0.57 },
-  { type: 'terrace', x: -0.84, z: 0.52, yaw: 0.08, rx: 0.46, rz: 0.57 },
+  // Homes occupy the west coast, upper ridge and east garden. Shared services
+  // remain at the harbor; short lanes connect each neighborhood to the core.
+  { type: 'workPlaza', x: 0.00, z: 0.10, yaw: 0, rx: 0.46, rz: 0.30 },
+  { type: 'opsBeacon', x: 0.00, z: 0.10, yaw: 0, scale: 0.68 },
+  { type: 'cottage', ownerKey: 'rodi',   x: -0.10, z: 1.02, yaw: 3.14, scale: 0.64, wall: 0xe8e9ed, roof: 0x1f2a44 },
+  { type: 'cottage', ownerKey: 'jarvis', x: -1.08, z: 0.04, yaw: 1.40, scale: 0.62, wall: 0xdce3e6, roof: 0x4f6f8f },
+  { type: 'cottage', ownerKey: 'yul',    x: 0.96, z: -0.02, yaw: -1.20, scale: 0.62, wall: 0xdbe7e4, roof: 0x1c4f5a },
+  { type: 'cottage', ownerKey: 'ludwig', x: -1.15, z: 0.82, yaw: 1.90, scale: 0.62, wall: 0xe3e4e9, roof: 0x737d91 },
+  { type: 'cottage', ownerKey: 'anne',   x: 1.30, z: 0.80, yaw: -2.00, scale: 0.62, wall: 0xe6eee5, roof: 0x8faf8f },
 
-  // Rodi anchors the rear ridge; paired homes sit on the west/east shoulders.
-  // Smaller footprints and a wider arc keep every facade and roof mark legible.
-  { type: 'cottage', ownerKey: 'rodi',   x: 0, z: 1.03, yaw: 3.08, scale: 0.66, wall: 0xe8e9ed, roof: 0x1f2a44 },
-  { type: 'cottage', ownerKey: 'jarvis', x: -0.72, z: 0.84, yaw: 2.68, scale: 0.61, wall: 0xdce3e6, roof: 0x4f6f8f },
-  { type: 'cottage', ownerKey: 'yul',    x: 0.68, z: 0.84, yaw: -2.68, scale: 0.62, wall: 0xdbe7e4, roof: 0x1c4f5a },
-  { type: 'cottage', ownerKey: 'ludwig', x: -0.98, z: 0.20, yaw: 1.68, scale: 0.58, wall: 0xe3e4e9, roof: 0x737d91 },
-  { type: 'cottage', ownerKey: 'anne',   x: 0.98, z: 0.20, yaw: -1.68, scale: 0.58, wall: 0xe6eee5, roof: 0x8faf8f },
+  // Shared landmarks give each district a public purpose beyond its home.
+  // They stay visually substantial while most street furniture remains
+  // collider-free, preserving wide walk corridors.
+  { type: 'civicPavilion', x: 0.38, z: -0.16, yaw: -0.18, scale: 0.62 },
+  { type: 'resultBoard', x: -0.25, z: 0.26, yaw: 0.16, scale: 0.72 },
+  { type: 'clockKiosk', x: -0.50, z: -0.28, yaw: 0.08, scale: 0.80 },
+  { type: 'repairShed', x: 0.78, z: -0.34, yaw: -0.12, scale: 1.00 },
+  { type: 'ferryGate', x: 0.34, z: -0.43, yaw: -0.04, scale: 0.82 },
 
-  // The harbor is one readable scene: two boats, two stalls, and a handful
-  // of working props. The open water and clear lane do most of the work.
-  { type: 'fishingBoat', x: -0.36, z: -0.68, yaw: 0.18, scale: 0.90, color: 0x6f9eb2 },
-  { type: 'fishingBoat', x: 0.42,  z: -0.61, yaw: -0.25, scale: 0.80, color: 0xf0eadc },
-  { type: 'harborBuoy', x: -0.82, z: -0.76, yaw: 0, scale: 0.78 },
-  { type: 'harborBuoy', x: 0.78,  z: -0.73, yaw: 0, scale: 0.76 },
-  { type: 'marketStall', x: -0.46, z: -0.42, yaw: 0.08, color: 0xd98268 },
-  { type: 'marketStall', x: 0.30,  z: -0.41, yaw: -0.04, color: 0x6f9eb2 },
-  { type: 'fishCrate', x: -0.78, z: -0.16, yaw: 0.28, scale: 0.84 },
-  { type: 'fishCrate', x: 0.66,  z: -0.13, yaw: -0.18, scale: 0.78 },
-  { type: 'netRack', x: -0.58, z: -0.30, yaw: 0.08, scale: 0.88 },
+  // One orientation marker, one waiting bench and a pair of lamps are enough
+  // to explain the civic core without repeating miniature street furniture.
+  { type: 'wayfinder', x: -0.30, z: -0.04, yaw: -0.22, scale: 0.62 },
+  { type: 'streetLamp', x: -0.48, z: -0.12, yaw: 0, scale: 0.84 },
 
-  // Shoreline punctuation: enough geometry to draw the coast, with gaps so
-  // it never becomes a necklace of identical objects.
-  { type: 'rock', x: -1.42, z: -0.34, yaw: 0.2, scale: 1.08 },
-  { type: 'rock', x: -0.93, z: -0.29, yaw: 2.0, scale: 0.70 },
-  { type: 'rock', x: 0.05,  z: -0.35, yaw: 0.8, scale: 0.62 },
-  { type: 'rock', x: 0.94,  z: -0.27, yaw: 1.5, scale: 0.74 },
-  { type: 'rock', x: 1.42,  z: -0.34, yaw: 0.4, scale: 1.04 },
-  { type: 'busStop', x: 0.66, z: -0.20, yaw: -1.44, scale: 0.80 },
-  { type: 'bench', x: -0.46, z: -0.08, yaw: 1.50, scale: 0.84 },
-  { type: 'utilityPole', x: -1.24, z: 0.46, yaw: 3.142, scale: 0.76 },
+  // The south edge is a working harbor, not a strip of unrelated samples.
+  // Cargo, mooring and lifting props cluster around the two market stalls.
+  { type: 'fishingBoat', x: -0.28, z: -0.92, yaw: 0.18, scale: 1.30, color: 0x6f9eb2 },
+  { type: 'harborBuoy', x: -0.72, z: -0.72, yaw: 0, scale: 0.90 },
+  { type: 'channelBeacon', x: 0.56, z: -1.14, yaw: 0, scale: 0.96, color: 0xe5b94f },
+  { type: 'cargoFerry', x: 1.34, z: -1.16, yaw: -0.42, scale: 0.82, color: 0xd98267 },
+  { type: 'marketStall', x: -0.26, z: -0.34, yaw: -0.02, scale: 0.94, color: 0x6f9eb2 },
+  { type: 'harborCrane', x: 1.40, z: -0.52, yaw: -0.78, scale: 0.74 },
 
-  // Three vegetation masses frame the homes; agent colors remain the accents.
-  { type: 'coastPine', x: -1.28, z: 0.72, yaw: -0.1, scale: 0.64 },
-  { type: 'camellia', x: 0.30, z: 1.18, yaw: 0.2, scale: 0.60 },
-  { type: 'camellia', x: 1.28, z: 0.70, yaw: -0.3, scale: 0.60 },
-
-  // Six larger tetrapods imply the two breakwater arms without repeating the
-  // same silhouette ten times.
-  { type: 'tetrapod', x: -1.58, z: -0.53, yaw: 0.3, scale: 1.36 },
-  { type: 'tetrapod', x: -1.31, z: -0.82, yaw: 1.3, scale: 1.46 },
-  { type: 'tetrapod', x: -0.78, z: -1.02, yaw: 2.4, scale: 1.38 },
-  { type: 'tetrapod', x: 1.58,  z: -0.53, yaw: 2.8, scale: 1.36 },
-  { type: 'tetrapod', x: 1.31,  z: -0.82, yaw: 1.8, scale: 1.46 },
-  { type: 'tetrapod', x: 0.78,  z: -1.02, yaw: 0.6, scale: 1.38 },
+  // Two different silhouettes frame the village without repeating greenery.
+  { type: 'coastPine', x: -1.50, z: 0.40, yaw: -0.10, scale: 0.68 },
+  { type: 'camellia', x: 0.45, z: 1.02, yaw: 0.20, scale: 0.56 },
 ];
 
 const HARBOR_REAR_LAYOUT = [
   // Argos inherits the old far-side-home contract, but his home is now the
   // violet-and-white lighthouse and participates in the same service interaction.
-  { type: 'lighthouse', ownerKey: 'argos', n: [0, -0.505, -0.863], yaw: 3.142, scale: 0.86 },
-  { type: 'bench', n: [0.40, -0.75, -0.52], yaw: 3.142, scale: 0.92 },
-  { type: 'lantern', n: [-0.12, -0.69, -0.72], yaw: 0.2, scale: 0.72 },
+  { type: 'lighthouse', ownerKey: 'argos', n: HARBOR_REAR_LIGHTHOUSE_DIR.toArray(), yaw: 3.142, scale: 0.86 },
   { type: 'rock', n: [-0.25, -0.62, -0.74], yaw: 0.4, scale: 1.35 },
-  { type: 'rock', n: [0.24, -0.64, -0.73], yaw: 2.2, scale: 1.25 },
-  { type: 'rock', n: [-0.38, -0.48, -0.79], yaw: 1.2, scale: 1.10 },
-  { type: 'rock', n: [0.39, -0.46, -0.80], yaw: 2.7, scale: 1.05 },
-  { type: 'coastPine', n: [-0.28, -0.40, -0.87], yaw: -0.1, scale: 0.92 },
-  { type: 'coastPine', n: [0.31, -0.38, -0.87], yaw: 0.2, scale: 0.86 },
-  { type: 'coastPine', n: [-0.42, -0.58, -0.70], yaw: -0.2, scale: 0.82 },
-  { type: 'camellia', n: [-0.20, -0.61, -0.77], yaw: 0.2, scale: 0.90 },
-  { type: 'camellia', n: [0.19, -0.61, -0.77], yaw: -0.3, scale: 0.86 },
-  { type: 'camellia', n: [-0.34, -0.53, -0.78], yaw: 0.6, scale: 0.80 },
-  { type: 'camellia', n: [0.34, -0.52, -0.79], yaw: -0.5, scale: 0.82 },
-
-  // Sparse east-side transition grove following the green path back to harbor.
-  { type: 'camellia', n: [0.94, 0.10, 0.32], yaw: 0.1, scale: 0.76 },
-  { type: 'camellia', n: [0.92, -0.12, -0.38], yaw: -0.2, scale: 0.80 },
-  { type: 'camellia', n: [0.77, -0.36, -0.53], yaw: 0.4, scale: 0.78 },
-  { type: 'camellia', n: [0.54, -0.50, -0.68], yaw: -0.4, scale: 0.82 },
 ];
 
-const DEFAULT_LAYOUT = [
+const WORLD_HOME_SITES = Object.freeze({
+  rodi: Object.freeze({ n: [0, 0.96, 0.28], yaw: Math.PI, district: 'front-ridge' }),
+  jarvis: Object.freeze({ n: [-0.90, 0.42, 0.12], yaw: 0, district: 'west-coast' }),
+  yul: Object.freeze({ n: [0.90, 0.42, 0.12], yaw: 0, district: 'east-coast' }),
+  ludwig: Object.freeze({ n: [-0.45, 0.60, -0.66], yaw: 0, district: 'rear-west-highland' }),
+  anne: Object.freeze({ n: [0.65, 0.43, -0.63], yaw: 0, district: 'rear-east-garden' }),
+});
+
+function isRetiredOceanTrail(entry) {
+  if (entry.kind !== 'path' || entry.type !== 'camellia') return false;
+  const original = HARBOR_TERRAIN_LAYOUT.find((path) => path.type === 'camellia');
+  const expected = normalizePathDirs(original);
+  const actual = normalizePathDirs(entry);
+  return actual.length === expected.length && actual.every((dir, i) => dir.angleTo(expected[i]) < 0.003);
+}
+
+function spreadWorldNeighborhoods(layout) {
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const work = (key) => unit(AGENT_DISTRICT_ANCHORS[key]);
+  const sideOf = (key, distance) => {
+    const dir = unit(WORLD_HOME_SITES[key].n);
+    return offsetSurfaceDir(dir, tangentBasis(dir).east, distance).toArray();
+  };
+  const west = [mapDir(-0.86, 0.08).toArray(), mapDir(-1.1, 0.45).toArray(), work('jarvis').toArray()];
+  const east = [mapDir(0.74, 0.10).toArray(), mapDir(1.1, 0.45).toArray(), work('yul').toArray()];
+  const highland = [work('jarvis').toArray(), [-0.65, 0.73, -0.20], work('ludwig').toArray(),
+    [0.05, 0.80, -0.60], work('anne').toArray(), [0.72, 0.64, -0.27], work('yul').toArray()];
+  const replacements = [
+    ...['lane', 'laneEdge'].flatMap((type) => [
+      { type, before: HARBOR_WEST_LANE_POINTS, after: west },
+      { type, before: HARBOR_EAST_LANE_POINTS, after: east },
+    ]),
+    ...HARBOR_TERRAIN_LAYOUT.filter((p) => ['grass', 'courtyard'].includes(p.type)).map((p, i) => ({
+      type: p.type, before: p.points,
+      after: sphericalRing(WORLD_HOME_SITES[['anne', 'jarvis', 'yul'][i]].n, p.type === 'grass' ? 0.23 : 0.20, 16),
+    })),
+    ...HARBOR_DISTRICT_INFRASTRUCTURE.filter((p) => p.type === 'hedge').map((p, i) => ({
+      type: p.type, before: p.points,
+      after: sphericalArc(WORLD_HOME_SITES[i === 0 ? 'ludwig' : 'anne'].n, 0.27, Math.PI * 0.9, Math.PI * 1.5, 7),
+    })),
+  ];
+  const movedProps = {
+    civicPavilion: { n: sideOf('ludwig', 0.38), yaw: -0.3 },
+    clockKiosk: { n: sideOf('jarvis', 0.34), yaw: 0 },
+    repairShed: { n: sideOf('yul', -0.38), yaw: 0.2 },
+    streetLamp: { n: sideOf('jarvis', -0.29), yaw: 0 },
+    camellia: { n: sideOf('anne', 0.34), yaw: 0.2 },
+    coastPine: { n: sideOf('ludwig', -0.33), yaw: -0.1 },
+  };
+  function entryDirection(entry) {
+    return Array.isArray(entry.n) ? new THREE.Vector3(...entry.n).normalize() : mapDir(entry.x, entry.z);
+  }
+  const result = layout.filter((source) => !isRetiredOceanTrail(source)
+    && !(source.type === 'coastPine' && Array.isArray(source.n)
+    && entryDirection(source).angleTo(unit([0.31, -0.38, -0.87])) < 0.003)).map((source) => {
+    const entry = { ...source };
+    if (entry.kind === 'path') {
+      const dirs = normalizePathDirs(entry);
+      const replacement = replacements.find((p) => p.type === entry.type && p.before.length === dirs.length
+        && dirs.every((dir, i) => dir.angleTo(mapDir(...p.before[i])) < 0.003));
+      if (replacement) {
+        entry.n = replacement.after.map((n) => unit(n).toArray());
+        delete entry.points;
+      }
+      // The remote lighthouse has a local approach. Ocean travel between
+      // districts uses boats instead of an invisible bridge across the sea.
+      if (entry.type === 'lane' && dirs.length === 6
+          && dirs[0].angleTo(mapDir(-0.72, 0.33)) < 0.003) {
+        entry.n = [HARBOR_REAR_LIGHTHOUSE_APPROACH,
+          offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR,
+            propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.40).toArray()];
+        delete entry.points;
+      }
+      return entry;
+    }
+    const site = WORLD_HOME_SITES[entry.ownerKey];
+    if (entry.type === 'cottage' && site) {
+      entry.n = unit(site.n).toArray();
+      entry.yaw = site.yaw;
+      delete entry.x;
+      delete entry.z;
+      return entry;
+    }
+    const moved = movedProps[entry.type];
+    const original = HARBOR_FRONT_LAYOUT.find((p) => p.type === entry.type);
+    if (moved && original && entryDirection(entry).angleTo(entryDirection(original)) < 0.003) {
+      entry.n = unit(moved.n).toArray();
+      entry.yaw = moved.yaw;
+      delete entry.x;
+      delete entry.z;
+    }
+    return entry;
+  });
+  const exists = result.some((p) => p.kind === 'path' && p.type === 'lane'
+    && normalizePathDirs(p).length === highland.length
+    && normalizePathDirs(p).every((d, i) => d.angleTo(unit(highland[i])) < 0.003));
+  if (!exists) result.push({ kind: 'path', type: 'lane', n: highland.map((n) => unit(n).toArray()) });
+  return result;
+}
+
+function migrateRoadJunctions(layout) {
+  const center = mapDir(0, 0.10);
+  const direction = (entry) => entry.n ? new THREE.Vector3(...entry.n).normalize() : mapDir(entry.x, entry.z);
+  const core = layout.find((entry) => entry.type === 'opsBeacon');
+  const rodi = layout.find((entry) => entry.ownerKey === 'rodi' && entry.type === 'cottage');
+  if (!core || !rodi || direction(core).angleTo(center) > 0.003
+      || Math.abs((core.scale ?? 1) - 0.68) > 0.001
+      || direction(rodi).angleTo(new THREE.Vector3(...WORLD_HOME_SITES.rodi.n).normalize()) > 0.003) return layout;
+  const matches = (entry, points) => {
+    const dirs = normalizePathDirs(entry);
+    return entry.kind === 'path' && dirs.length === points.length
+      && dirs.every((dir, i) => dir.angleTo(mapDir(...points[i])) < 0.003);
+  };
+  if (!layout.some((p) => p.type === 'road' && matches(p, HARBOR_MAIN_STREET_POINTS))
+      || !layout.some((p) => p.type === 'road' && matches(p, HARBOR_HARBOR_AXIS_POINTS))) return layout;
+  const rimToward = (target) => {
+    const tangent = target.clone().sub(center.clone().multiplyScalar(target.dot(center))).normalize();
+    return offsetSurfaceDir(center, tangent, 0.205).toArray();
+  };
+  const main = HARBOR_MAIN_STREET_POINTS.map((p) => mapDir(...p));
+  const axis = HARBOR_HARBOR_AXIS_POINTS.map((p) => mapDir(...p));
+  const house = direction(rodi);
+  const forecourt = offsetSurfaceDir(house, propFacing(house, rodi.yaw ?? Math.PI),
+    0.27 * 0.92 * (rodi.scale ?? 1) + 0.026 + 0.06).toArray();
+  const replacements = [
+    [HARBOR_MAIN_STREET_POINTS, [
+      [main[0].toArray(), main[1].toArray(), rimToward(main[1])],
+      [rimToward(main[3]), main[3].toArray(), main[4].toArray()],
+    ]],
+    [HARBOR_HARBOR_AXIS_POINTS, [
+      [mapDir(0, -0.40).toArray(), axis[1].toArray(), rimToward(axis[1])],
+      [rimToward(new THREE.Vector3(...forecourt)), forecourt],
+    ]],
+  ];
+  const result = layout.flatMap((entry) => {
+    if (!['road', 'streetEdge'].includes(entry.type)) return [entry];
+    const replacement = replacements.find(([before]) => matches(entry, before));
+    if (!replacement) return [entry];
+    return replacement[1].map((n) => ({ kind: 'path', type: entry.type, n }));
+  });
+  const ring = sphericalRing(center.toArray(), 0.205, 40);
+  result.push({ kind: 'path', type: 'road', n: ring }, { kind: 'path', type: 'streetEdge', n: ring });
+  return result;
+}
+
+function lighthouseIsletOutline(grow = 0) {
+  const center = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR,
+    propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.12);
+  const basis = tangentBasis(center);
+  const points = Array.from({ length: 28 }, (_, i) => {
+    const angle = i / 28 * Math.PI * 2;
+    const ripple = 1 + Math.sin(angle * 3 + 0.4) * 0.055;
+    return center.clone().add(basis.east.clone().multiplyScalar(Math.cos(angle) * (0.35 + grow) * ripple))
+      .add(basis.north.clone().multiplyScalar(Math.sin(angle) * (0.42 + grow) * ripple)).normalize().toArray();
+  });
+  return [...points, points[0].slice()];
+}
+
+function migrateSharedHarbor(layout) {
+  const direction = (p) => p.n ? new THREE.Vector3(...p.n).normalize() : mapDir(p.x, p.z);
+  const matches = (p, expected) => {
+    const actual = normalizePathDirs(p);
+    return actual.length === expected.length && actual.every((d, i) => d.angleTo(new THREE.Vector3(...expected[i]).normalize()) < 0.003);
+  };
+  const result = layout.map((p) => ({ ...p }));
+  const home = result.find((p) => p.ownerKey === 'argos' && p.type === 'lighthouse');
+  const oldIsland = sphericalRing([0, -0.578, -0.816], 0.46, 20, Math.PI / 20);
+  const island = result.find((p) => p.type === 'island' && matches(p, oldIsland));
+  // Only reshape the original cape. A moved home or hand-edited coast is kept.
+  const isletCenter = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR,
+    propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.12);
+  const marineTypes = new Set(['fishingBoat', 'cargoFerry', 'harborBuoy', 'channelBeacon']);
+  const protectedShoreProps = result.some((p) => {
+    if (p.kind === 'path' || p === home || marineTypes.has(p.type)) return false;
+    const dir = direction(p);
+    if (p.type === 'rock' && dir.angleTo(new THREE.Vector3(-0.25, -0.62, -0.74).normalize()) < 0.003) return false;
+    const distance = dir.angleTo(isletCenter);
+    return distance > 0.26 && distance < 0.60;
+  });
+  if (home && island && !protectedShoreProps && (home.scale ?? 1) <= 1
+      && direction(home).angleTo(HARBOR_REAR_LIGHTHOUSE_DIR) < 0.003) {
+    island.n = lighthouseIsletOutline();
+    delete island.points;
+    const center = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR, propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.12);
+    result.push({ kind: 'path', type: 'openWater', n: sphericalRing(center.toArray(), 0.57, 32) },
+      { kind: 'path', type: 'wave', n: lighthouseIsletOutline(0.035) },
+      { kind: 'path', type: 'deck', n: [0.34, 0.60].map((distance) => offsetSurfaceDir(
+        HARBOR_REAR_LIGHTHOUSE_DIR, propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), distance).toArray()) });
+  }
+  const pavilion = result.find((p) => p.type === 'civicPavilion');
+  const pavilionSite = new THREE.Vector3(...WORLD_HOME_SITES.ludwig.n).normalize();
+  const originalPavilion = offsetSurfaceDir(pavilionSite, tangentBasis(pavilionSite).east, 0.38);
+  if (pavilion && direction(pavilion).angleTo(originalPavilion) < 0.003 && Math.abs((pavilion.scale ?? 1) - 0.62) < 0.001) {
+    pavilion.scale = 0.95;
+    const near = result.filter((p) => p.type === 'lane').flatMap(normalizePathDirs)
+      .sort((a, b) => a.angleTo(originalPavilion) - b.angleTo(originalPavilion))[0];
+    if (near) {
+      const basis = tangentBasis(originalPavilion);
+      pavilion.yaw = Math.atan2(near.dot(basis.east), near.dot(basis.north));
+    }
+  }
+  if (!result.some((p) => p.type === 'harborShelter')) {
+    const site = mapDir(-0.62, -0.20);
+    const occupied = result.some((p) => p.kind !== 'path' && direction(p).angleTo(site) < 0.24);
+    if (!occupied) result.push({ type: 'harborShelter', n: site.toArray(),
+      yaw: canonicalMapYaw(-0.62, -0.20, Math.PI), scale: 0.90 });
+  }
+  return result;
+}
+
+function migrateVillageBoard(layout) {
+  const result = layout.map((p) => ({ ...p }));
+  const boards = result.filter((p) => p.type === 'resultBoard');
+  const position = { n: mapDir(-0.36, 0.39).toArray(), yaw: canonicalMapYaw(-0.36, 0.39, Math.PI), scale: 0.90 };
+  if (!boards.length) result.push({ type: 'resultBoard', ...position });
+  for (const board of boards) {
+    const dir = board.n ? new THREE.Vector3(...board.n).normalize() : mapDir(board.x, board.z);
+    if (dir.angleTo(mapDir(-0.25, 0.26)) < 0.003 && Math.abs((board.scale ?? 1) - 0.72) < 0.001) {
+      Object.assign(board, position); delete board.x; delete board.z;
+    }
+  }
+  return result;
+}
+
+function migrateSpatialStructure(layout) {
+  const result = layout.map((p) => ({ ...p }));
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const centerOf = (points) => points.reduce((sum, n) => sum.add(n), new THREE.Vector3()).normalize();
+  const dir = (p) => p.n ? unit(p.n) : mapDir(p.x, p.z);
+  const matches = (p, expected) => {
+    const points = normalizePathDirs(p);
+    return points.length === expected.length && points.every((n, i) => n.angleTo(unit(expected[i])) < 0.003);
+  };
+  const core = result.find((p) => p.type === 'opsBeacon');
+  const ring = sphericalRing(mapDir(0, 0.10).toArray(), 0.205, 40);
+  if (core && dir(core).angleTo(mapDir(0, 0.10)) < 0.003) {
+    for (const p of result) {
+      if (p.kind === 'path' && ['road', 'streetEdge'].includes(p.type) && matches(p, ring)) {
+        p.id = p.type === 'road' ? 'core.promenade' : 'core.plaza-edge'; p.districtId = 'core';
+      }
+    }
+  }
+  // Only the known default sites are migrated. Moved homes and hand-drawn
+  // courtyards remain untouched; stable IDs survive save/import/undo.
+  for (const key of ['rodi', 'jarvis', 'yul', 'ludwig', 'anne']) {
+    const home = result.find((p) => p.type === 'cottage' && p.ownerKey === key);
+    if (!home || dir(home).angleTo(unit(WORLD_HOME_SITES[key].n)) > 0.003) continue;
+    const id = `${key}.forecourt`;
+    if (result.some((p) => p.id === id)) continue;
+    const center = dir(home), front = propFacing(center, home.yaw || 0);
+    const side = new THREE.Vector3().crossVectors(front, center).normalize();
+    const type = key === 'anne' ? 'grass' : 'courtyard';
+    const prior = result.find((p) => p.kind === 'path' && p.type === type
+      && matches(p, sphericalRing(WORLD_HOME_SITES[key].n, type === 'grass' ? 0.23 : 0.20, 16)));
+    const custom = result.some((p) => p !== prior && p.kind === 'path' && ['grass', 'courtyard'].includes(p.type)
+      && centerOf(normalizePathDirs(p)).angleTo(center) < 0.25);
+    if (custom) continue;
+    const right = ['jarvis', 'ludwig'].includes(key) ? 0.43 : 0.27;
+    const left = key === 'yul' ? -0.43 : -0.27;
+    const outline = [[left, -0.13], [right * 0.8, -0.15], [right, 0.02],
+      [right * 0.92, 0.23], [0.09, 0.31], [left * 0.88, 0.24], [left, 0.04]];
+    const n = outline.map(([x, z]) => center.clone().addScaledVector(side, x).addScaledVector(front, z).normalize().toArray());
+    if (prior) Object.assign(prior, { n, id, districtId: key });
+    else result.push({ kind: 'path', type, n, id, districtId: key });
+    if (prior) delete prior.points;
+    if (key === 'anne' && !result.some((p) => p.id === 'anne.garden-coast')) {
+      result.push({ kind: 'path', type: 'island', n, id: 'anne.garden-coast', districtId: key });
+    }
+  }
+  if (!result.some((p) => p.id === 'rose.quiet-garden')
+      && !result.some((p) => p.kind === 'path' && ['grass', 'courtyard'].includes(p.type)
+        && centerOf(normalizePathDirs(p)).angleTo(new THREE.Vector3(0, 1, 0)) < 0.18)) {
+    result.push({ kind: 'path', type: 'grass', id: 'rose.quiet-garden', districtId: 'rose',
+      n: sphericalRing([0, 1, 0], 0.17, 16) });
+  }
+  const gate = result.find((p) => p.type === 'ferryGate' && dir(p).angleTo(mapDir(0.34, -0.43)) < 0.003);
+  if (gate && (gate.scale ?? 1) === 0.82) {
+    gate.n = mapDir(-0.30, -0.54).toArray();
+    gate.yaw = canonicalMapYaw(-0.30, -0.54, 0);
+    delete gate.x; delete gate.z;
+  }
+  return result;
+}
+
+function migrateVillageComposition(layout) {
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const dir = (p) => p.n ? unit(p.n) : mapDir(p.x, p.z);
+  const matches = (p, points) => {
+    const actual = normalizePathDirs(p);
+    return actual.length === points.length && actual.every((n, i) => n.angleTo(unit(points[i])) < 0.003);
+  };
+  const result = layout.map((p) => ({ ...p }));
+  const oldPavilion = offsetSurfaceDir(unit(WORLD_HOME_SITES.ludwig.n),
+    tangentBasis(unit(WORLD_HOME_SITES.ludwig.n)).east, 0.38);
+  const pavilion = result.find((p) => p.type === 'civicPavilion' && dir(p).angleTo(oldPavilion) < 0.003
+    && Math.abs((p.scale ?? 1) - 0.95) < 0.001);
+  const rearJunction = unit([0.05, 0.80, -0.60]);
+  const rearSite = unit([0.10, 0.52, -0.85]);
+  const rearRoad = result.some((p) => p.type === 'lane'
+    && normalizePathDirs(p).some((n) => n.angleTo(rearJunction) < 0.003));
+  const occupied = result.some((p) => p.kind !== 'path' && p !== pavilion
+    && dir(p).angleTo(rearSite) < (p.ownerKey || p.type === 'harborShelter' ? 0.33 : 0.24));
+  if (pavilion && rearRoad && !occupied) {
+    pavilion.n = rearSite.toArray();
+    const basis = tangentBasis(rearSite);
+    pavilion.yaw = Math.atan2(rearJunction.dot(basis.east), rearJunction.dot(basis.north));
+    delete pavilion.x; delete pavilion.z;
+  }
+  // Extend only the original harbor spur; custom streets keep their endpoints.
+  for (const p of result) {
+    if (!['road', 'streetEdge'].includes(p.type)) continue;
+    const points = normalizePathDirs(p);
+    if (points.length === 3 && points[0].angleTo(mapDir(0, -0.40)) < 0.003
+        && points[1].angleTo(mapDir(-0.05, -0.22)) < 0.003) {
+      p.n = [mapDir(0, -0.425).toArray(), ...points.slice(1).map((n) => n.toArray())];
+      delete p.points;
+    }
+  }
+  const rose = result.find((p) => p.id === 'rose.quiet-garden' && p.type === 'grass'
+    && matches(p, sphericalRing([0, 1, 0], 0.17, 16)));
+  const roseJunction = unit([-0.65, 0.73, -0.20]);
+  const roseRoad = result.some((p) => p.type === 'lane'
+    && normalizePathDirs(p).some((n) => n.angleTo(roseJunction) < 0.003));
+  const approach = [unit([-0.14, 0.99, -0.043]), unit([-0.32, 0.94, -0.098]), roseJunction];
+  const roseOccupied = result.some((p) => p.kind !== 'path'
+    && approach.some((n) => dir(p).angleTo(n) < 0.20));
+  if (rose && roseRoad && !roseOccupied) {
+    rose.type = 'courtyard';
+    rose.n = sphericalRing([0, 1, 0], 0.12, 16);
+    delete rose.points;
+    if (!result.some((p) => p.id === 'rose.approach')) result.push({ kind: 'path', type: 'lane',
+      id: 'rose.approach', districtId: 'rose', n: approach.map((n) => n.toArray()) });
+  }
+  // This is the specific offshore placement reviewed in v105, not every saved boat.
+  const stranded = unit([-0.7627984, -0.4034992, 0.5052989]);
+  const mooring = mapDir(-0.28, -0.92);
+  const pier = result.some((p) => p.type === 'deck'
+    && matches(p, [[-0.28, -0.41], [-0.30, -0.68]].map((n) => mapDir(...n).toArray())));
+  const boat = result.find((p) => p.type === 'fishingBoat' && dir(p).angleTo(stranded) < 0.001);
+  if (boat && pier && !result.some((p) => p !== boat && p.kind !== 'path'
+      && dir(p).angleTo(mooring) < (p.type === 'ferryGate' ? 0.18 : 0.25))) {
+    boat.n = mooring.toArray(); boat.yaw = 0.18;
+    delete boat.x; delete boat.z;
+  }
+  const retiredTerraces = [unit([-0.42039, 0.64069, 0.64249]), unit([0.41240, 0.64950, 0.63880])];
+  return result.filter((p) => !(p.type === 'terrace'
+    && retiredTerraces.some((n) => dir(p).angleTo(n) < 0.001)));
+}
+
+function migrateSavedComposition(layout, raw) {
+  const key = 'HandulPlanet_composition_v106';
+  try {
+    if (localStorage.getItem(key)) return layout;
+    const next = migrateVillageComposition(layout);
+    if (JSON.stringify(next) !== JSON.stringify(layout)) {
+      const backups = JSON.parse(localStorage.getItem(LAYOUT_BACKUP_KEY) || '[]');
+      const kept = Array.isArray(backups) ? backups.slice(-4) : [];
+      kept.push({ schemaVersion: LAYOUT_SCHEMA_VERSION, createdAt: new Date().toISOString(),
+        reason: 'before-composition-v106', layout: JSON.parse(raw) });
+      // Do not change the saved arrangement unless its original is backed up.
+      localStorage.setItem(LAYOUT_BACKUP_KEY, JSON.stringify(kept));
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+    }
+    // If only the marker fails, keep rendering the already-saved arrangement.
+    // The geometry migration is idempotent, so a retry is harmless.
+    try { localStorage.setItem(key, '1'); } catch (_) { /* retry next load */ }
+    return next;
+  } catch (error) {
+    console.warn('배치 개선 백업/저장 보류:', error);
+    return layout;
+  }
+}
+
+const DEFAULT_LAYOUT = migrateVillageComposition(migrateSpatialStructure(migrateVillageBoard(migrateSharedHarbor(migrateRoadJunctions(spreadWorldNeighborhoods([
   ...HARBOR_TERRAIN_LAYOUT,
+  ...HARBOR_DISTRICT_INFRASTRUCTURE,
   ...HARBOR_FRONT_LAYOUT,
   ...HARBOR_REAR_LAYOUT,
-];
+]))))));
 
 // Home driveways are terrain tied to each service-home spot — regenerated
 // whenever the layout changes, so they follow the houses around in edit mode.
 // Agent home assignment rides along: reassigned whenever cottages change.
 // (stub until the agents exist; replaced after the AGENTS block below)
 const HOME_PROP_TYPES = new Set(['cottage', 'lighthouse']);
+const PUBLIC_SPACE_TYPES = new Set(['civicPavilion', 'harborShelter']);
 let assignAgentHomes = () => {};
 function homeDoorDir(home) {
   if (!home?.mesh || !home.dir) return null;
@@ -3212,29 +4769,142 @@ function homeDoorDir(home) {
 }
 const drivewayGroup = new THREE.Group();
 scene.add(drivewayGroup);
+const drivewayConnections = [];
+
+function nearestStreetConnection(home, doorDir) {
+  const facing = propFacing(home.data.dir, home.data.yaw || 0);
+  let best = null;
+  for (const path of editablePaths) {
+    const streetTypes = PUBLIC_SPACE_TYPES.has(home.data.type) ? ['road', 'lane', 'market', 'deck'] : ['road', 'lane'];
+    if (!streetTypes.includes(path.data.type)) continue;
+    const samples = splineDirs(path.data.dirs, { step: 0.015 }).dirs;
+    for (const dir of samples) {
+      const tangent = dir.clone().sub(home.data.dir.clone().multiplyScalar(dir.dot(home.data.dir)));
+      const ahead = tangent.lengthSq() > 1e-8 ? tangent.normalize().dot(facing) : 1;
+      if (ahead < -0.12) continue;
+      const angle = doorDir.angleTo(dir);
+      const score = angle + Math.max(0, 0.18 - ahead) * 0.08;
+      if (!best || score < best.score) best = { dir: dir.clone(), score, angle, type: path.data.type };
+    }
+  }
+  return best;
+}
+
 function rebuildDriveways() {
   // Group.clear() detaches but never disposes — free the GPU resources first,
   // or dragging a cottage (which rebuilds continuously) leaks geometries.
   for (const child of drivewayGroup.children.slice()) disposeObject(child);
   drivewayGroup.clear();
+  drivewayConnections.length = 0;
   for (const it of editables) {
-    if (!HOME_PROP_TYPES.has(it.data.type)) continue;
-    // a short stub out the FRONT DOOR (along the cottage's facing) — works
-    // anywhere on the planet, not just relative to the village street
-    const face = propFacing(it.data.dir, it.data.yaw || 0);
-    const start = offsetSurfaceDir(it.data.dir, face, 0.13);
-    const end = offsetSurfaceDir(it.data.dir, face, 0.42);
-    const dw = makeCountryRoad([start, end],
-      { width: 0.28, color: 0xb89b73, lift: 0.106 });
-    dw.userData.surfaceDir = it.dir.clone();
-    drivewayGroup.add(dw);
+    if (!HOME_PROP_TYPES.has(it.data.type) && !PUBLIC_SPACE_TYPES.has(it.data.type)) continue;
+    const start = homeDoorDir(it);
+    const connection = start ? nearestStreetConnection(it, start) : null;
+    if (!start || !connection || connection.angle > 0.34) continue;
+    const end = connection.dir;
+    const paving = makeCountryRoad([start, end],
+      { width: 0.50, color: 0xc5c8b0, lift: 0.168 });
+    paving.userData.surfaceDir = it.dir.clone();
+    drivewayGroup.add(paving);
+    drivewayConnections.push({
+      home: it,
+      ownerKey: it.data.ownerKey || '',
+      streetType: connection.type,
+      length: connection.angle * R,
+      start: start.clone(),
+      end: end.clone(),
+    });
   }
+  rebuildStreetEdges();
   assignAgentHomes();
 }
-// cottages carry extras (driveway + agent home flag/nameplate) — call this after
-// any editor mutation, and it rebuilds them only when a cottage was involved
+
+function rebuildStreetEdges() {
+  const widths = { road: 0.90, lane: 0.70, deck: 0.62, market: 0.72 };
+  const streets = editablePaths.filter((path) => widths[path.data.type]).map((path) => ({
+    dirs: path.data.dirs,
+    samples: splineDirs(path.data.dirs, { step: 0.012 }).dirs,
+    width: widths[path.data.type],
+  }));
+  const driveways = drivewayConnections.map((link) => ({
+    samples: splineDirs([link.start, link.end], { step: 0.012 }).dirs, width: 0.50,
+  }));
+  for (const path of editablePaths) {
+    if (!['streetEdge', 'laneEdge'].includes(path.data.type)) continue;
+    const others = streets.filter((street) => !samePathRoute(street.dirs, path.data.dirs));
+    const crossings = [...others, ...driveways];
+    const old = path.mesh;
+    const mesh = path.data.id === 'core.plaza-edge' ? new THREE.Group() : makeStreetEdges(path.data.dirs, {
+      radius: R, roadWidth: path.data.type === 'streetEdge' ? 0.90 : 0.70,
+      splineDirs, makeSurfaceRibbon, materialFactory: toonMat,
+      isOpening: (dir) => crossings.some((street) => street.samples.some((sample) =>
+        sample.dot(dir) > Math.cos((street.width / 2 + 0.07) / R))),
+    });
+    mesh.visible = old.visible;
+    applyPaperObject(mesh);
+    scene.add(mesh);
+    path.mesh = mesh;
+    removeSceneObject(old);
+  }
+}
+
+function roadClearanceState() {
+  const paths = editablePaths.filter((path) => ['road', 'lane'].includes(path.data.type));
+  const issues = [];
+  let samples = 0, blockedSamples = 0, wetSamples = 0;
+  const result = paths.map((path, index) => {
+    const width = path.data.type === 'road' ? 0.90 : 0.70;
+    const { dirs, closed } = splineDirs(path.data.dirs, { step: 0.012 });
+    let blocked = 0, wet = 0;
+    for (let i = 0; i < dirs.length; i++) {
+      const dir = dirs[i];
+      const previous = dirs[closed ? (i - 1 + dirs.length) % dirs.length : Math.max(0, i - 1)];
+      const next = dirs[closed ? (i + 1) % dirs.length : Math.min(dirs.length - 1, i + 1)];
+      const side = new THREE.Vector3().crossVectors(dir, next.clone().sub(previous)).normalize();
+      for (const lateral of [-1, 0, 1]) {
+        const point = offsetSurfaceDir(dir, side, lateral * Math.max(0, width / (2 * R) - PLAYER_CLEARANCE_RADIUS));
+        samples++;
+        const collider = getSurfaceColliders().find((item) => point.angleTo(item.dir) < item.radius + PLAYER_CLEARANCE_RADIUS);
+        const inWater = isWaterSurfaceDir(point);
+        if (collider) { blocked++; blockedSamples++; }
+        if (inWater) { wet++; wetSamples++; }
+        if ((collider || inWater) && !issues.some((issue) => issue.path === index && issue.obstacle === (collider?.label || 'water'))) {
+          issues.push({ path: index, type: path.data.type, obstacle: collider?.label || 'water', n: point.toArray() });
+        }
+      }
+    }
+    return { type: path.data.type, closed, samples: dirs.length * 3, blocked, wet };
+  });
+  return { paths: paths.length, samples, blockedSamples, wetSamples, issues, segments: result,
+    pass: paths.length > 0 && blockedSamples === 0 && wetSamples === 0 };
+}
+
+function sharedHarborState() {
+  const spaces = editables.filter((item) => PUBLIC_SPACE_TYPES.has(item.data.type)).map((item) => {
+    const link = drivewayConnections.find((connection) => connection.home === item);
+    const samples = link ? splineDirs([link.start, link.end], { step: 0.012 }).dirs : [];
+    return { type: item.data.type, connected: !!link, length: link ? +link.length.toFixed(3) : null,
+      clear: samples.length > 0 && samples.every((dir) => !isInWaterDir(dir) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS)) };
+  });
+  const lighthouse = editables.find((item) => item.data.type === 'lighthouse' && item.data.ownerKey === 'argos');
+  const islandChecked = !!lighthouse && lighthouse.dir.angleTo(HARBOR_REAR_LIGHTHOUSE_DIR) < 0.003
+    && editablePaths.some((item) => item.data.type === 'openWater');
+  const coast = islandChecked ? lighthouseIsletOutline(0.065).slice(0, -1).map((n) => new THREE.Vector3(...n)) : [];
+  const pierEnd = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR, propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.68);
+  const mooring = offsetSurfaceDir(pierEnd, tangentBasis(pierEnd).east, 0.16);
+  const landing = islandChecked ? nearestDryShoreDirection(mooring) : null;
+  const island = { checked: islandChecked, coastSamples: coast.length,
+    waterSamples: coast.filter(isWaterSurfaceDir).length,
+    boatOnly: islandChecked && isWaterSurfaceDir(mooring) && !playerSurfaceAllowed(mooring, false),
+    canLand: !!landing && !isInWaterDir(landing) && hasSurfaceClearance(landing, PLAYER_CLEARANCE_RADIUS) };
+  const boat = editables.find((item) => item.data.type === 'fishingBoat');
+  return { spaces, island, boatScale: boat ? +(boat.mesh.scale.x).toFixed(3) : null,
+    pass: spaces.length === 2 && spaces.every((space) => space.connected && space.clear)
+      && island.checked && island.waterSamples === island.coastSamples && island.boatOnly && island.canLand };
+}
+// Rebuild dependent driveways and curb openings after home or street edits.
 function syncCottageExtras(type) {
-  if (HOME_PROP_TYPES.has(type)) rebuildDriveways();
+  if (HOME_PROP_TYPES.has(type) || PUBLIC_SPACE_TYPES.has(type) || ['road', 'lane', 'streetEdge', 'laneEdge', 'deck', 'market'].includes(type)) rebuildDriveways();
 }
 // throttle wrapper for continuous (per-pointermove) rebuilds while dragging
 let lastDrivewayRebuild = 0;
@@ -3250,7 +4920,9 @@ function rebuildDrivewaysThrottled() {
 // A saved layout that somehow still fails to build must never brick the app —
 // fall back to the default village.
 try {
-  buildLayout(loadSavedLayout() || DEFAULT_LAYOUT);
+  // QA defaults to the release layout; qaLayout=saved also exercises migration.
+  buildLayout(URL_PARAMS.has('qa') && URL_PARAMS.get('qaLayout') !== 'saved'
+    ? DEFAULT_LAYOUT : (loadSavedLayout() || DEFAULT_LAYOUT));
 } catch (e) {
   console.warn('saved layout failed to build — using default', e);
   try { localStorage.removeItem(LAYOUT_KEY); } catch (_) { /* ignore */ }
@@ -3269,6 +4941,7 @@ rebuildDriveways();
 // ---------------------------------------------------------------------------
 const worldLabelsEl = document.getElementById('worldLabels');
 const worldLabels = new Set();
+const labelSizeCache = createElementSizeCache();
 const _labelWorld = new THREE.Vector3();
 const _labelProjected = new THREE.Vector3();
 const _labelCameraDir = new THREE.Vector3();
@@ -3295,9 +4968,18 @@ function createWorldLabel(text, {
   color = null,
   kind = bubble ? 'bubble' : 'default',
   visibilityDot = 0.14,
+  onActivate = null,
 } = {}) {
-  const element = document.createElement('div');
+  const element = document.createElement(onActivate ? 'button' : 'div');
   element.className = `world-label ${kind}${bubble ? ' bubble' : ''}${emoji ? ' emoji' : ''}`;
+  if (onActivate) {
+    element.type = 'button';
+    element.classList.add('interactive');
+    element.setAttribute('aria-label', text);
+    element.inert = document.body.classList.contains('intro-active');
+    element.title = `${text} 이야기`;
+    element.addEventListener('click', onActivate);
+  } else element.setAttribute('aria-hidden', 'true');
   if (color) {
     const dot = document.createElement('span');
     dot.className = 'world-label-dot';
@@ -3333,17 +5015,26 @@ function createWorldLabel(text, {
 function removeWorldLabel(label) {
   if (!label) return;
   worldLabels.delete(label);
+  labelSizeCache.remove(label.element);
   label.element.remove();
 }
 
-// The rose keeps one quiet story label. Celestial bodies stay label-free so
-// they read as distant atmosphere rather than explicit navigation markers.
-createWorldLabel('B-612의 장미', {
+function openRoseStory() {
+  if (editMode || document.body.classList.contains('intro-active')) return false;
+  dashboardStopPatrol();
+  dashboardCloseCard();
+  dashboardCloseTeam();
+  closeServicePanel();
+  villageBoard.close?.();
+  return roseStory.open();
+}
+const roseLabel = createWorldLabel('B-612의 장미', {
   target: poleRose,
   offset: new THREE.Vector3(0, 2.24, 0),
   direction: NORTH_POLE,
   kind: 'landmark',
   visibilityDot: 0.015,
+  onActivate: openRoseStory,
 });
 
 function isObjectInside(object, ancestor) {
@@ -3405,6 +5096,9 @@ function addLabelUiObstacles(accepted) {
 
 function updateWorldLabels() {
   worldLabelFrame++;
+  const measureAt = performance.now();
+  const accepted = [];
+  addLabelUiObstacles(accepted);
   _labelCameraDir.copy(camera.position).normalize();
   const mobileControlsVisible = experienceMode === 'explore' && innerWidth <= 520;
   const candidates = [];
@@ -3470,7 +5164,6 @@ function updateWorldLabels() {
     const opacity = (0.5 + nearFactor * 0.5) * label.alpha;
     const scale = 0.85 + nearFactor * 0.15;
     element.hidden = false;
-    element.style.opacity = opacity.toFixed(3);
     label.collisionHidden = false;
     label.hiddenReason = '';
     candidates.push({
@@ -3479,19 +5172,26 @@ function updateWorldLabels() {
       y,
       scale,
       distance,
-      width: Math.max(1, element.offsetWidth) * scale,
-      height: Math.max(1, element.offsetHeight) * scale,
+      opacity,
       priority: labelPriority(label),
     });
   }
 
+  // Read all sizes before opacity/transform writes, avoiding per-label reflow.
+  for (const candidate of candidates) {
+    const size = labelSizeCache.measure(candidate.label.element, measureAt);
+    candidate.width = size.width * candidate.scale;
+    candidate.height = size.height * candidate.scale;
+  }
   candidates.sort((a, b) => b.priority - a.priority || a.distance - b.distance);
-  const accepted = [];
-  addLabelUiObstacles(accepted);
   const baseOffsets = [0, -18, 18, -36, 36, -54, 54];
 
   for (const candidate of candidates) {
-    const { label, x, y, width, height, scale } = candidate;
+    const { label, x: anchorX, y, width, height, scale } = candidate;
+    label.element.style.opacity = candidate.opacity.toFixed(3);
+    const x = candidate.priority >= LABEL_PRIORITY.player
+      ? THREE.MathUtils.clamp(anchorX, 8 + width / 2, innerWidth - 8 - width / 2)
+      : anchorX;
     const canSettle = Math.abs(label.screenOffsetY) > 0.5
       && worldLabelFrame - label.offsetChangedAt > 18;
     const offsets = [
@@ -3520,8 +5220,8 @@ function updateWorldLabels() {
     // Speech and player feedback must never disappear; lower-priority chips
     // yield when the frame is too crowded.
     if (!placed && candidate.priority >= LABEL_PRIORITY.player) {
-      const offsetY = label.screenOffsetY || 0;
-      const anchorY = y + offsetY;
+      const anchorY = THREE.MathUtils.clamp(y + (label.screenOffsetY || 0), height + 8, innerHeight - 8);
+      const offsetY = anchorY - y;
       placed = {
         offsetY,
         rect: {
@@ -3608,6 +5308,7 @@ function makeCharacter(bodyColor, headColor = 0xffe8cf, name = null, opts = {}) 
   const shoeMat = toonMat(0x424957);
 
   g.userData.characterType = 'person';
+  g.userData.modelHeight = 1.35;
   g.userData.labelHeight = 1.62;
   g.userData.activityHeight = 1.48;
   g.userData.bodyMaterial = bodyMat;
@@ -4172,7 +5873,10 @@ function animateCharacterWalk(char, move01, t) {
   }
 }
 
+const CHARACTER_WORLD_SCALE = 0.84;
 const player = makeCharacter(save.data.modelFiles.base, 0xffe8cf, '한들');   // 나 — avatar color from saved state
+batchStaticMeshTree(player);
+player.scale.setScalar(CHARACTER_WORLD_SCALE);
 const body = player.userData.body;
 scene.add(player);
 
@@ -4431,12 +6135,13 @@ AGENTS.forEach((d, i) => {
   c.userData.characterType = d.character || 'person';
   addAgentAccessories(c, d.visual);
   addAgentActivitySignal(c, d.color, d.activityStyle);
+  batchStaticMeshTree(c);
   c.userData.agent = d;                          // dashboard record for the status card
   d.npc = c;                                     // back-reference (bubbles, camera focus)
   const configuredScale = Number(d.visual.scale);
-  c.scale.setScalar(Number.isFinite(configuredScale)
+  c.scale.setScalar((Number.isFinite(configuredScale)
     ? THREE.MathUtils.clamp(configuredScale, 0.86, 1.22)
-    : 1.02 + (i % 3) * 0.07);                    // agents, not buildings, are the visual protagonists
+    : 1.02 + (i % 3) * 0.07) * CHARACTER_WORLD_SCALE);
 
   // evenly distributed point on the unit sphere
   const y = 1 - (i + 0.5) / N * 2;               // y from ~+1 down to ~-1
@@ -4491,6 +6196,23 @@ function makeAgentFlag(color) {
 
 const homeMarkers = [];   // flags, rebuilt whenever cottages change
 const homeLabels = [];    // DOM nameplates, rebuilt with their cottage targets
+function findHomeWorkDir(home, preferred) {
+  const usable = (dir) => !isInWaterDir(dir) && hasSurfaceClearance(dir, 0.026);
+  if (preferred && home.dir.angleTo(preferred) < 0.42 && usable(preferred)) return preferred;
+  const forward = propFacing(home.dir, home.data.yaw || 0);
+  // A moved or scaled house may cover its former work anchor. Search outside
+  // the actual collider, preferring its entrance and then the side yards.
+  const radius = (PROP_DEFS[home.data.type]?.collider || 0.27)
+    * (PROP_DEFS[home.data.type]?.baseScale ?? 1) * (home.data.scale ?? 1);
+  for (const margin of [0.07, 0.13, 0.21, 0.32]) {
+    for (const angle of [0, -0.55, 0.55, -1.1, 1.1, -1.7, 1.7, Math.PI]) {
+      const candidate = offsetSurfaceDir(home.dir,
+        forward.clone().applyAxisAngle(home.dir, angle), radius + margin);
+      if (usable(candidate)) return candidate;
+    }
+  }
+  return null;
+}
 assignAgentHomes = function (repositionNpcs = false) {
   // clear old markers (their cottages may have been rebuilt or deleted)
   for (const m of homeMarkers) {
@@ -4520,15 +6242,9 @@ assignAgentHomes = function (repositionNpcs = false) {
     a.workDir = null;
     if (!home) return;
     addAgentHomeSignature(home.mesh, a.key);
-    if (a.key === 'argos') {
-      // The watcher works at the lighthouse instead of commuting to the
-      // front-side yard.
-      a.workDir = offsetSurfaceDir(home.dir, propFacing(home.dir, home.data.yaw || 0), 0.12);
-    } else {
-      const approach = slerpDir(home.dir, AGENT_PLAZA_DIR, 0.48);
-      const lateral = tangentBasis(approach).east;
-      a.workDir = offsetSurfaceDir(approach, lateral, (i - 2) * 0.018);
-    }
+    const configured = AGENT_DISTRICT_ANCHORS[a.key];
+    const district = configured ? new THREE.Vector3(...configured).normalize() : null;
+    a.workDir = findHomeWorkDir(home, district);
     const flag = makeAgentFlag(a.color);
     // OUTSIDE the front wall beside the door (walls span x±1.97, z±1.81 local —
     // the old (1.5, 1.55) spot was buried inside the house geometry)
@@ -4547,13 +6263,8 @@ assignAgentHomes = function (repositionNpcs = false) {
     homeLabels.push(plate);
 
     // on first assignment, drop each agent near their own house
-    if (repositionNpcs && a.npc) {
-      const t = tangentBasis(home.dir);
-      const ang = i * 2.4;
-      a.npc.userData.dir = home.dir.clone()
-        .add(t.east.multiplyScalar(Math.cos(ang) * 0.35))
-        .add(t.north.multiplyScalar(Math.sin(ang) * 0.35))
-        .normalize();
+    if (repositionNpcs && a.npc && a.workDir) {
+      a.npc.userData.dir = a.workDir.clone();
     }
   });
   syncAgentHomeStatusVisuals();
@@ -4561,7 +6272,7 @@ assignAgentHomes = function (repositionNpcs = false) {
 assignAgentHomes(true);
 
 // player state on the sphere: a position (unit dir) + a heading angle around it
-let playerDir = mapDir(0.02, 0.02);                   // central open street; also the dashboard's quiet camera anchor
+let playerDir = DEFAULT_PLAYER_SPAWN_DIR.clone();     // south avenue: clear of the operations-core collider
 let playerForward = mapForward(0, 1);                 // character facing (visual)
 player.userData.nameLabel = createWorldLabel(player.userData.labelText, {
   target: player,
@@ -4574,8 +6285,258 @@ player.userData.nameLabel = createWorldLabel(player.userData.labelText, {
 // sideways doesn't swing the camera; only dragging rotates it.
 const camDir = playerForward.clone();
 const WALK = 0.9;                                      // radians/sec of surface travel scaled below
+const SAIL = 0.62;
 const TURN_SPEED = 2.2;                                // radians/sec of A/D turning
 let playerStride = 0;                                  // smoothed 0..1 walk intensity for limb swing
+let lastSafePlayerDir = playerDir.clone();
+let playerBlockedFor = 0;
+let playerRecoveryCount = 0;
+let lastPlayerEscapeOptions = 12;
+let activeBoatItem = null;
+const BOAT_INTERACT_ANGLE = 0.30;
+const _playerSurfaceQ = new THREE.Quaternion();
+
+function playerSurfaceAllowed(dir, aboard = !!activeBoatItem) {
+  return aboard ? isWaterSurfaceDir(dir) : !isInWaterDir(dir);
+}
+
+function nearestBoardableBoat(origin = playerDir, maxAngle = BOAT_INTERACT_ANGLE) {
+  let nearest = null;
+  let nearestAngle = maxAngle;
+  for (const item of editables) {
+    if (item.data.type !== 'fishingBoat' || !isWaterSurfaceDir(item.dir)) continue;
+    const angle = origin.angleTo(item.dir);
+    if (angle < nearestAngle) {
+      nearest = item;
+      nearestAngle = angle;
+    }
+  }
+  return nearest;
+}
+
+function surfaceStepDirection(origin, tangent, angle) {
+  const up = origin.clone().normalize();
+  const travel = tangent.clone().sub(up.clone().multiplyScalar(tangent.dot(up)));
+  if (travel.lengthSq() < 1e-10 || angle <= 0) return up;
+  travel.normalize();
+  const axis = new THREE.Vector3().crossVectors(up, travel).normalize();
+  _playerSurfaceQ.setFromAxisAngle(axis, angle);
+  return up.applyQuaternion(_playerSurfaceQ).normalize();
+}
+
+function playerEscapeOptionCount(origin = playerDir, step = 0.045, samples = 12, aboard = !!activeBoatItem) {
+  const basis = tangentBasis(origin);
+  let options = 0;
+  for (let i = 0; i < samples; i++) {
+    const angle = (i / samples) * Math.PI * 2;
+    const travel = basis.east.clone().multiplyScalar(Math.cos(angle))
+      .add(basis.north.clone().multiplyScalar(Math.sin(angle)));
+    const candidate = surfaceStepDirection(origin, travel, step);
+    if (hasSurfaceClearance(candidate, PLAYER_CLEARANCE_RADIUS) && playerSurfaceAllowed(candidate, aboard)) options++;
+  }
+  return options;
+}
+
+function commitPlayerSurfaceDirection(nextDir) {
+  const next = nextDir.clone().normalize();
+  _playerSurfaceQ.setFromUnitVectors(playerDir, next);
+  playerForward.applyQuaternion(_playerSurfaceQ);
+  camDir.applyQuaternion(_playerSurfaceQ);
+  playerDir.copy(next);
+  keepPlayerForwardTangent();
+}
+
+function syncActiveBoatTransform() {
+  if (!activeBoatItem) return;
+  activeBoatItem.data.dir.copy(playerDir);
+  const basis = tangentBasis(playerDir);
+  activeBoatItem.data.yaw = Math.atan2(playerForward.dot(basis.east), playerForward.dot(basis.north));
+  applyPropTransform(activeBoatItem);
+}
+
+function boardBoat(item) {
+  if (!item || item.data.type !== 'fishingBoat' || !isWaterSurfaceDir(item.dir)) return false;
+  activeBoatItem = item;
+  commitPlayerSurfaceDirection(item.dir);
+  playerForward.copy(propFacing(item.dir, item.data.yaw || 0)).normalize();
+  camDir.copy(playerForward);
+  keepPlayerForwardTangent();
+  jumpVel = 0;
+  jumpHeight = 0;
+  onGround = true;
+  player.visible = false;
+  if (player.userData.nameLabel) player.userData.nameLabel.enabled = false;
+  document.body.classList.add('boat-mode');
+  syncActiveBoatTransform();
+  ambientAudio.playEffect('board');
+  showAppNotice('어선에 승선했습니다. 방향키나 WASD로 운항하고, 해안 가까이에서 F로 내릴 수 있어요.');
+  return true;
+}
+
+function nearestDryShoreDirection(origin = playerDir) {
+  const basis = tangentBasis(origin);
+  const candidates = [];
+  for (const radius of [0.035, 0.06, 0.09, 0.13, 0.18, 0.24, 0.31]) {
+    for (let index = 0; index < 24; index++) {
+      const angle = index / 24 * Math.PI * 2;
+      const tangent = basis.east.clone().multiplyScalar(Math.cos(angle))
+        .add(basis.north.clone().multiplyScalar(Math.sin(angle)));
+      const candidate = surfaceStepDirection(origin, tangent, radius);
+      if (isInWaterDir(candidate) || !hasSurfaceClearance(candidate, PLAYER_CLEARANCE_RADIUS)) continue;
+      const exits = playerEscapeOptionCount(candidate, 0.038, 10, false);
+      if (exits < 2) continue;
+      candidates.push({
+        dir: candidate,
+        exits,
+        score: exits * 0.012 + surfaceColliderClearance(candidate) * 0.5 - radius,
+      });
+    }
+    if (candidates.length) break;
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.dir || null;
+}
+
+function disembarkBoat({ notify = true } = {}) {
+  if (!activeBoatItem) return false;
+  const shore = nearestDryShoreDirection(playerDir);
+  if (!shore) {
+    if (notify) showAppNotice('해안에 조금 더 가까이 가야 배에서 내릴 수 있어요.');
+    return false;
+  }
+  syncActiveBoatTransform();
+  activeBoatItem = null;
+  commitPlayerSurfaceDirection(shore);
+  lastSafePlayerDir.copy(shore);
+  playerBlockedFor = 0;
+  player.visible = experienceMode === 'explore' && !activeBoatItem;
+  if (player.userData.nameLabel) {
+    player.userData.nameLabel.enabled = experienceMode === 'explore' && !activeBoatItem;
+  }
+  document.body.classList.remove('boat-mode');
+  if (notify) {
+    ambientAudio.playEffect('land');
+    showAppNotice('해안에 내렸습니다.');
+  }
+  return true;
+}
+
+function cancelBoatModeToSafeSurface() {
+  if (!activeBoatItem) return;
+  syncActiveBoatTransform();
+  activeBoatItem = null;
+  commitPlayerSurfaceDirection(lastSafePlayerDir);
+  document.body.classList.remove('boat-mode');
+}
+
+function nearestSafePlayerDirection(origin = playerDir) {
+  const candidates = [];
+  const consider = (candidate, bonus = 0) => {
+    if (!candidate
+      || !playerSurfaceAllowed(candidate)
+      || !hasSurfaceClearance(candidate, PLAYER_CLEARANCE_RADIUS)) return;
+    const distance = origin.angleTo(candidate);
+    const escapeOptions = playerEscapeOptionCount(candidate, 0.038, 10);
+    if (escapeOptions < 2) return;
+    const clearance = Math.min(0.16, surfaceColliderClearance(candidate) - PLAYER_CLEARANCE_RADIUS);
+    candidates.push({
+      dir: candidate.clone(),
+      escapeOptions,
+      score: bonus + clearance * 1.8 + escapeOptions * 0.008 - distance * 0.48,
+    });
+  };
+
+  const depenetrated = resolveSurfaceColliderPenetration(
+    origin,
+    PLAYER_CLEARANCE_RADIUS + 0.008,
+  );
+  consider(depenetrated, 0.04);
+  if (lastSafePlayerDir.angleTo(origin) < 0.65 || (!activeBoatItem && isInWaterDir(origin))) {
+    consider(lastSafePlayerDir, 0.10);
+  }
+
+  const basis = tangentBasis(origin);
+  for (const radius of [0.04, 0.07, 0.11, 0.17, 0.25]) {
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2;
+      const tangent = basis.east.clone().multiplyScalar(Math.cos(angle))
+        .add(basis.north.clone().multiplyScalar(Math.sin(angle)));
+      consider(surfaceStepDirection(origin, tangent, radius));
+    }
+    if (candidates.some((candidate) => candidate.escapeOptions >= 6)) break;
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.dir || null;
+}
+
+function recoverPlayerToSafeSurface({ notify = true, force = false } = {}) {
+  const clear = playerSurfaceAllowed(playerDir)
+    && hasSurfaceClearance(playerDir, PLAYER_CLEARANCE_RADIUS);
+  const options = playerEscapeOptionCount(playerDir);
+  lastPlayerEscapeOptions = options;
+  if (!force && clear && options > 1) return false;
+  if (force && clear && options >= 4) {
+    if (notify) showAppNotice('현재 위치는 충분히 이동할 수 있는 공간이에요.');
+    return false;
+  }
+  const safe = nearestSafePlayerDirection(playerDir);
+  if (!safe) {
+    if (notify) showAppNotice('가까운 안전 지점을 찾지 못했어요. 편집 모드에서 주변 오브젝트를 조금 띄워주세요.');
+    return false;
+  }
+  commitPlayerSurfaceDirection(safe);
+  lastSafePlayerDir.copy(safe);
+  playerBlockedFor = 0;
+  playerRecoveryCount++;
+  if (notify) showAppNotice('좁은 틈에서 가까운 안전 지점으로 이동했어요.');
+  return true;
+}
+
+function tryMovePlayerOnSurface(travel, step) {
+  const tangent = travel.clone()
+    .sub(playerDir.clone().multiplyScalar(travel.dot(playerDir)));
+  if (tangent.lengthSq() < 1e-10) return false;
+  tangent.normalize();
+
+  const direct = surfaceStepDirection(playerDir, tangent, step);
+  if (playerSurfaceAllowed(direct) && hasSurfaceClearance(direct, PLAYER_CLEARANCE_RADIUS)) {
+    commitPlayerSurfaceDirection(direct);
+    return true;
+  }
+
+  // Remove the component pointing into each nearby obstacle. A slight outward
+  // bias keeps the spherical step from cutting back through a curved collider.
+  const blockers = getSurfaceColliders().filter((collider) => (
+    direct.angleTo(collider.dir) < collider.radius + PLAYER_CLEARANCE_RADIUS + step
+  ));
+  const slide = tangent.clone();
+  for (const blocker of blockers) {
+    const toward = blocker.dir.clone()
+      .sub(playerDir.clone().multiplyScalar(playerDir.dot(blocker.dir)));
+    if (toward.lengthSq() < 1e-10) continue;
+    toward.normalize();
+    const inward = slide.dot(toward);
+    if (inward > 0) slide.addScaledVector(toward, -inward - 0.16);
+  }
+
+  const side = new THREE.Vector3().crossVectors(playerDir, tangent).normalize();
+  const directions = [];
+  if (slide.lengthSq() > 1e-5) directions.push(slide.normalize());
+  for (const angle of [0.48, -0.48, 0.82, -0.82]) {
+    directions.push(tangent.clone().multiplyScalar(Math.cos(angle))
+      .add(side.clone().multiplyScalar(Math.sin(angle))).normalize());
+  }
+  for (const direction of directions) {
+    for (const scale of [1, 0.62, 0.34]) {
+      const candidate = surfaceStepDirection(playerDir, direction, step * scale);
+      if (!playerSurfaceAllowed(candidate)
+        || !hasSurfaceClearance(candidate, PLAYER_CLEARANCE_RADIUS)) continue;
+      commitPlayerSurfaceDirection(candidate);
+      return true;
+    }
+  }
+  return false;
+}
 
 // jump state — vertical hop above the surface (height in world units along `up`)
 let jumpVel = 0, jumpHeight = 0, onGround = true;
@@ -4588,9 +6549,19 @@ const JUMP_SPEED = 4.0, GRAVITY = 12.0;
 // Input
 // ---------------------------------------------------------------------------
 const keys = {};
+document.addEventListener('village-board-open', () => {
+  for (const key of Object.keys(keys)) delete keys[key];
+  jumpRequested = false;
+});
+document.addEventListener('rose-story-open', () => {
+  for (const key of Object.keys(keys)) delete keys[key];
+  stickVec.x = stickVec.y = 0;
+  jumpRequested = false;
+});
 const MOVEMENT_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
 let jumpRequested = false;
 addEventListener('keydown', e => {
+  if (villageBoard.isOpen() || roseStory.isOpen()) return;
   const key = e.key.toLowerCase();
   const movementKey = MOVEMENT_KEYS.has(key);
   const quickAgentIndex = Number(key) - 1;
@@ -4610,6 +6581,11 @@ addEventListener('keydown', e => {
   }
   if (isUiInteractionTarget(e.target)) {
     if (key === 'escape') dashboardStopPatrol();
+    return;
+  }
+  if (key === 'r' && !editMode && experienceMode === 'explore') {
+    e.preventDefault();
+    recoverPlayerToSafeSurface({ notify: true, force: true });
     return;
   }
   if (cameraIntro) skipCameraIntro();
@@ -4651,7 +6627,33 @@ const FOCUS_NON_OCCLUDERS = new Set(['road', 'trail', 'river', 'pond', 'sand', '
 const _focusRaycaster = new THREE.Raycaster();
 const _focusRayDirection = new THREE.Vector3();
 const _focusLookTarget = new THREE.Vector3();
+const _focusTransitLookTarget = new THREE.Vector3();
 const _focusHomePosition = new THREE.Vector3();
+const _focusCameraDir = new THREE.Vector3();
+const _focusTargetDir = new THREE.Vector3();
+const _focusArcRotation = new THREE.Quaternion();
+const _focusArcStep = new THREE.Quaternion();
+let cameraTransitionMinClearance = Infinity;
+let trackCameraTransition = false;
+
+function moveCameraAroundPlanet(target, alpha) {
+  const currentRadius = camera.position.length();
+  const targetRadius = target.length();
+  _focusCameraDir.copy(camera.position).normalize();
+  _focusTargetDir.copy(target).normalize();
+  _focusArcRotation.setFromUnitVectors(_focusCameraDir, _focusTargetDir);
+  _focusArcStep.identity().slerp(_focusArcRotation, alpha);
+  _focusCameraDir.applyQuaternion(_focusArcStep).normalize();
+  camera.position.copy(_focusCameraDir.multiplyScalar(
+    THREE.MathUtils.lerp(currentRadius, targetRadius, alpha),
+  ));
+  if (trackCameraTransition) {
+    cameraTransitionMinClearance = Math.min(
+      cameraTransitionMinClearance,
+      camera.position.length() - R,
+    );
+  }
+}
 
 function chooseAgentFocusSide(npc) {
   const up = npc.userData.dir.clone().normalize();
@@ -4667,7 +6669,8 @@ function chooseAgentFocusSide(npc) {
     .filter((item) => !item.isPath && !FOCUS_NON_OCCLUDERS.has(item.data.type) && item.mesh?.visible)
     .map((item) => item.mesh);
   const lookAt = npc.position.clone().add(up.clone().multiplyScalar(0.82));
-  const angles = [0, 0.34, -0.34, 0.68, -0.68, 1.05, -1.05, Math.PI];
+  const frontage = home?.dir ? propFacing(home.dir, home.data.yaw || 0) : base;
+  const angles = [0, 0.34, -0.34, 0.68, -0.68, 1.05, -1.05, 1.57, -1.57, Math.PI];
   let best = base.clone();
   let bestScore = -Infinity;
 
@@ -4684,7 +6687,7 @@ function chooseAgentFocusSide(npc) {
     _focusRaycaster.far = Math.max(0.1, distance - 0.35);
     const blocked = occluders.length > 0
       && _focusRaycaster.intersectObjects(occluders, true).length > 0;
-    const score = base.dot(side) * 2 - Math.abs(angle) * 0.08 - (blocked ? 10 : 0);
+    const score = base.dot(side) + frontage.dot(side) * 1.6 - Math.abs(angle) * 0.08 - (blocked ? 10 : 0);
     if (score > bestScore) {
       bestScore = score;
       best.copy(side);
@@ -4695,6 +6698,8 @@ function chooseAgentFocusSide(npc) {
 
 // mouse drag to orbit the camera around the player (rotates the camDir anchor)
 let dragging = false, camPitch = 0.68, lastX = 0, lastY = 0;
+let dashboardYaw = 0;
+const dashboardOrbitAxis = new THREE.Vector3(0, 1, 0);
 let cameraIntro = null;
 renderer.domElement.addEventListener('pointerdown', e => {
   if (editMode) return;
@@ -4706,44 +6711,63 @@ addEventListener('pointerup', () => dragging = false);
 addEventListener('pointermove', e => {
   if (editMode || !dragging) return;
   const yawDelta = -(e.clientX - lastX) * 0.005;
-  camDir.applyAxisAngle(playerDir.clone().normalize(), yawDelta);
-  keepTangentAtPlayer(camDir);
+  if (experienceMode === 'dashboard') {
+    dashboardYaw = wrappedAngle(dashboardYaw + yawDelta);
+  } else {
+    camDir.applyAxisAngle(playerDir.clone().normalize(), yawDelta);
+    keepTangentAtPlayer(camDir);
+  }
   camPitch += (e.clientY - lastY) * 0.005;
   camPitch = Math.max(0.05, Math.min(1.2, camPitch));
   lastX = e.clientX; lastY = e.clientY;
 });
 
 // ---- zoom: mouse wheel + two-finger pinch ----
-const ZOOM_MIN = 4, ZOOM_MAX = 30;
+const ZOOM_MIN = 4, ZOOM_MAX = 48;
 const DESKTOP_CINEMATIC_CAM_DIST = 26;
-const DASHBOARD_CAM_DIST = 18.8;
-const MOBILE_DASHBOARD_CAM_DIST = 27.0;
-const MOBILE_INTRO_CAM_DIST = 29.5;
-const EXPLORE_CAM_DIST = 10.5;
-const DASHBOARD_CAM_PITCH = 0.82;
-const EXPLORE_CAM_PITCH = 0.50;
+const DASHBOARD_CAM_DIST = 21.5;
+const MOBILE_DASHBOARD_CAM_DIST = 44.0;
+const MOBILE_INTRO_CAM_DIST = 46.0;
+const EXPLORE_CAM_DIST = 4.3;
+const MOBILE_EXPLORE_CAM_DIST = 5.2;
+const DASHBOARD_CAM_PITCH = 1.00;
+const EXPLORE_CAM_PITCH = 0.34;
+const MOBILE_EXPLORE_CAM_PITCH = 0.44;
 let camDist = DASHBOARD_CAM_DIST;
 let experienceMode = 'dashboard';
 
 function dashboardCameraDistance() {
-  return innerWidth <= 520 ? MOBILE_DASHBOARD_CAM_DIST : DASHBOARD_CAM_DIST;
+  if (innerWidth <= 520) return MOBILE_DASHBOARD_CAM_DIST;
+  const aspect = innerWidth / Math.max(1, innerHeight);
+  return Math.min(MOBILE_DASHBOARD_CAM_DIST,
+    DASHBOARD_CAM_DIST * Math.max(1, 1.1 / aspect));
 }
 
 function introCameraDistance() {
   return innerWidth <= 520 ? MOBILE_INTRO_CAM_DIST : dashboardCameraDistance();
 }
 
+function exploreCameraDistance() {
+  return innerWidth <= 520 ? MOBILE_EXPLORE_CAM_DIST : EXPLORE_CAM_DIST;
+}
+
+function exploreCameraPitch() {
+  return innerWidth <= 520 ? MOBILE_EXPLORE_CAM_PITCH : EXPLORE_CAM_PITCH;
+}
+
 function dashboardLookHeight() {
   if (innerWidth <= 520) return 2.5;
-  return innerWidth / Math.max(1, innerHeight) > 1.5 ? 4.35 : 3.2;
+  return innerWidth / Math.max(1, innerHeight) > 1.5 ? 5.2 : 3.9;
 }
 
 function snapFollowCamera() {
-  const up = playerDir.clone().normalize();
-  const back = camDir.clone().multiplyScalar(-1);
+  const dashboard = experienceMode === 'dashboard';
+  const up = dashboard ? DASHBOARD_VIEW_DIR.clone().applyAxisAngle(dashboardOrbitAxis, dashboardYaw)
+    : playerDir.clone().normalize();
+  const back = (dashboard ? DASHBOARD_VIEW_FORWARD.clone().applyAxisAngle(dashboardOrbitAxis, dashboardYaw)
+    : camDir.clone()).multiplyScalar(-1);
   const camOffset = up.clone().multiplyScalar(Math.sin(camPitch) * camDist)
     .add(back.multiplyScalar(Math.cos(camPitch) * camDist));
-  const dashboard = experienceMode === 'dashboard';
   camera.position.copy(dashboard ? camOffset : player.position.clone().add(camOffset));
   camera.up.copy(up);
   camera.lookAt(dashboard
@@ -4756,9 +6780,9 @@ function startCameraIntro() {
     startedAt: performance.now(),
     duration: 2500,
     fromDist: innerWidth <= 520 ? MOBILE_INTRO_CAM_DIST : DESKTOP_CINEMATIC_CAM_DIST,
-    toDist: experienceMode === 'dashboard' ? dashboardCameraDistance() : EXPLORE_CAM_DIST,
+    toDist: experienceMode === 'dashboard' ? dashboardCameraDistance() : exploreCameraDistance(),
     fromPitch: 0.9,
-    toPitch: experienceMode === 'dashboard' ? DASHBOARD_CAM_PITCH : EXPLORE_CAM_PITCH,
+    toPitch: experienceMode === 'dashboard' ? DASHBOARD_CAM_PITCH : exploreCameraPitch(),
   };
   camDist = cameraIntro.fromDist;
   camPitch = cameraIntro.fromPitch;
@@ -4813,8 +6837,8 @@ function setExperienceMode(mode) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   }
-  camDist = experienceMode === 'dashboard' ? dashboardCameraDistance() : EXPLORE_CAM_DIST;
-  camPitch = experienceMode === 'dashboard' ? DASHBOARD_CAM_PITCH : EXPLORE_CAM_PITCH;
+  camDist = experienceMode === 'dashboard' ? dashboardCameraDistance() : exploreCameraDistance();
+  camPitch = experienceMode === 'dashboard' ? DASHBOARD_CAM_PITCH : exploreCameraPitch();
   if (experienceMode === 'dashboard') {
     stickVec.x = stickVec.y = 0;
     jumpRequested = false;
@@ -4833,7 +6857,7 @@ renderer.domElement.addEventListener('wheel', e => {
 }, { passive: false });
 
 // pinch-to-zoom on touch devices
-const pinch = { active: false, startDist: 0, startCam: EXPLORE_CAM_DIST };
+const pinch = { active: false, startDist: 0, startCam: exploreCameraDistance() };
 const touchPts = new Map();
 renderer.domElement.addEventListener('pointerdown', e => {
   if (e.pointerType === 'touch') touchPts.set(e.pointerId, e);
@@ -4885,6 +6909,11 @@ addEventListener('blur', () => {
 document.getElementById('mobileJumpBtn')?.addEventListener('click', () => {
   if (!editMode && experienceMode === 'explore') jumpRequested = true;
 });
+document.getElementById('mobileRecoverBtn')?.addEventListener('click', () => {
+  if (!editMode && experienceMode === 'explore') {
+    recoverPlayerToSafeSurface({ notify: true, force: true });
+  }
+});
 document.getElementById('mobileInteractBtn')?.addEventListener('click', () => {
   activateNearbyService();
 });
@@ -4901,6 +6930,12 @@ function pollGamepadInput(dt) {
     gamepadInteractHeld = false;
     gamepadSnapshot = next;
     return next;
+  }
+  if (villageBoard.isOpen() || roseStory.isOpen()) {
+    gamepadJumpHeld = next.jump;
+    gamepadInteractHeld = next.interact;
+    gamepadSnapshot = next;
+    return { ...next, forward: 0, turn: 0, lookX: 0, lookY: 0, jump: false, interact: false };
   }
 
   const moving = Math.abs(next.forward) > 0.01 || Math.abs(next.turn) > 0.01;
@@ -5272,6 +7307,7 @@ function updateAmbientScene(t, atmosphere = {}) {
   const day = THREE.MathUtils.clamp(Number(atmosphere.day) || 0, 0, 1);
   for (const item of editables) {
     const root = item.mesh;
+    if (!root.visible) continue;
     const phase = root.userData.motionPhase || 0;
     const floatBody = root.userData.floatBody;
     if (floatBody) {
@@ -5497,11 +7533,11 @@ function selectItem(item) {
 
 // move the selected item to a new surface direction — anywhere on the planet
 function moveSelectedTo(dir) {
-  if (!selectedItem) return;
+  if (!selectedItem || selectedItem.isPath) return;
   selectedItem.data.dir.copy(dir).normalize();
   applyPropTransform(selectedItem);
   refreshPropCollider(selectedItem);
-  if (selectedItem.data.type === 'cottage') rebuildDrivewaysThrottled();  // fires per pointermove
+  if (HOME_PROP_TYPES.has(selectedItem.data.type) || PUBLIC_SPACE_TYPES.has(selectedItem.data.type)) rebuildDrivewaysThrottled();
   highlightSelected();
 }
 
@@ -5513,6 +7549,7 @@ function rotateSelected(delta) {
   selectedItem.data.yaw = ((selectedItem.data.yaw || 0) + delta) % (Math.PI * 2);
   applyPropTransform(selectedItem);
   refreshPropCollider(selectedItem);
+  syncCottageExtras(selectedItem.data.type);
   saveLayout();
 }
 
@@ -5533,7 +7570,7 @@ function scaleSelected(factor) {
 function deleteSelected() {
   if (!selectedItem) return;
   const wasType = selectedItem.data.type;
-  if (selectedItem.isPath) removePath(selectedItem);
+  if (selectedItem.isPath) removeEditorPath(selectedItem);
   else removeProp(selectedItem);
   selectedItem = null;
   selectRing.visible = false;
@@ -5571,7 +7608,8 @@ function duplicateSelected() {
   let item = null;
   if (selectedItem.isPath) {
     const dirs = selectedItem.data.dirs.map(d => nudgeDir(d, 0.15, 0.15));
-    item = spawnPath({ kind: 'path', type: selectedItem.data.type, dirs });
+    item = spawnEditorPath({ kind: 'path', type: selectedItem.data.type, dirs });
+    if (item) syncCottageExtras(item.data.type);
   } else {
     const data = { ...selectedItem.data, dir: nudgeDir(selectedItem.data.dir, 0.15, 0.15) };
     if (HOME_PROP_TYPES.has(data.type)) delete data.ownerKey;
@@ -5610,6 +7648,10 @@ let drawingType = null;            // 'road' | 'river' while drawing, else null
 let drawPoints = [];               // [[x,z], …] collected so far
 let pendingDrawDir = null;         // surface dir under a pending click (drawing)
 let drawPointerStart = null;       // pointer-down pos, to tell a click from a drag
+const STRUCTURAL_PATH_TYPES = new Set([
+  'island', 'sea', 'deck', 'market', 'breakwater', 'wave', 'camellia',
+  'streetEdge', 'laneEdge', 'hedge', 'quayRail', 'courtyard',
+]);
 const drawPreview = new THREE.Group();
 drawPreview.visible = false;
 scene.add(drawPreview);
@@ -5650,6 +7692,7 @@ function updateDrawPreview() {
 
 function startDrawing(type) {
   selectItem(null);
+  if (STRUCTURAL_PATH_TYPES.has(type)) backupCurrentLayout('before-world-structure');
   drawingType = type;
   drawPoints = [];
   updateDrawPreview();
@@ -5676,7 +7719,8 @@ function finishDrawing() {
   const type = drawingType, dirs = drawPoints;
   cancelDrawing();
   if (!type || dirs.length < (PATH_DEFS[type]?.minPoints || 2)) return null;
-  const item = spawnPath({ kind: 'path', type, dirs });
+  const item = spawnEditorPath({ kind: 'path', type, dirs });
+  syncCottageExtras(type);
   saveLayout();
   return item;
 }
@@ -5752,22 +7796,24 @@ addEventListener('pointermove', (e) => {
     lastPointer = { x: e.clientX, y: e.clientY };
   }
 });
-addEventListener('pointerup', () => {
+function finishEditPointer(cancelled = false) {
   // commit a drawing point if the press was a click (not a drag)
   if (drawingType && drawPointerStart) {
-    if (pendingDrawDir) addDrawPoint(pendingDrawDir);
+    if (!cancelled && pendingDrawDir) addDrawPoint(pendingDrawDir);
     pendingDrawDir = null;
     drawPointerStart = null;
-    return;
   }
   if (editDragging) {
-    saveLayout();
     // the throttle may have skipped the last drag frames — settle driveways/flags
     if (selectedItem) syncCottageExtras(selectedItem.data.type);
+    saveLayout();
   }
   editDragging = false;
   camOrbiting = false;
-});
+}
+addEventListener('pointerup', () => finishEditPointer());
+addEventListener('pointercancel', () => finishEditPointer(true));
+addEventListener('blur', () => finishEditPointer(true));
 // wheel zooms the edit camera (independent of the play-mode zoom)
 renderer.domElement.addEventListener('wheel', (e) => {
   if (!editMode) return;
@@ -5814,10 +7860,13 @@ addEventListener('keydown', (e) => {
 
 // enter / leave edit mode (wired to UI buttons below)
 function enterEditMode() {
+  roseStory.close();
+  cancelBoatModeToSafeSurface();
   editMode = true;
   dashboardStopPatrol();
   focusNpc = null;                 // release any agent-focus camera
   focusSide = null;
+  trackCameraTransition = false;
   dashboardCloseCard();
   dashboardCloseTeam();
   closeServicePanel();
@@ -5839,15 +7888,41 @@ function exitEditMode() {
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
-const clock = new THREE.Clock();
 let lastDevMetricsAt = -1;
+let paperPixelSamples = 0;
 function publishDevMetrics(elapsed) {
   if (!URL_PARAMS.has('dev') || elapsed - lastDevMetricsAt < 0.5) return;
   lastDevMetricsAt = elapsed;
+  if (URL_PARAMS.has('qa') && elapsed > 2 && paperPixelSamples < 2) {
+    const gl = renderer.getContext();
+    const colors = new Set();
+    const pixel = new Uint8Array(4);
+    for (let y = 1; y < 8; y++) {
+      for (let x = 1; x < 8; x++) {
+        gl.readPixels(Math.floor(gl.drawingBufferWidth * x / 8),
+          Math.floor(gl.drawingBufferHeight * y / 8), 1, 1,
+          gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        colors.add(Array.from(pixel).join(','));
+      }
+    }
+    document.documentElement.dataset.qaCanvas = JSON.stringify({
+      width: gl.drawingBufferWidth, height: gl.drawingBufferHeight,
+      uniqueColors: colors.size, sample: ++paperPixelSamples,
+    });
+  }
   document.documentElement.dataset.qaPerformance = JSON.stringify({
     ...performanceGovernor.state(),
     ...horizonCulling,
   });
+  document.documentElement.dataset.qaRenderStability = JSON.stringify({
+    sceneSamples: composer.renderTarget1.samples,
+    bloomThreshold: bloom.threshold,
+    boardMeshes: editables.filter((item) => item.data.type === 'resultBoard').length,
+  });
+  document.documentElement.dataset.qaEfficiency = JSON.stringify({
+    loop: worldLoop.state(), labels: labelSizeCache.state(),
+  });
+  document.documentElement.dataset.qaAudio = JSON.stringify(ambientAudio.state());
   document.documentElement.dataset.qaSignatures = JSON.stringify(
     AGENTS.map((agent) => ({
       key: agent.key,
@@ -5855,10 +7930,8 @@ function publishDevMetrics(elapsed) {
     })),
   );
 }
-function animate() {
-  performanceGovernor.sample(performance.now());
-  const dt = Math.min(clock.getDelta(), 0.05);
-  const elapsed = clock.elapsedTime;
+function animate(dt, elapsed, now) {
+  performanceGovernor.sample(now);
   const gamepad = pollGamepadInput(dt);
 
   if (editMode) {
@@ -5889,9 +7962,9 @@ function animate() {
     updateEditCamera(dt);
     skySystem.updateEdit(dt, elapsed);    // keep weather and lighting alive while editing
     const editAtmosphere = skySystem.ambientState();
+    updateHorizonCulling();
     updateAmbientScene(elapsed, editAtmosphere);
     ambientAudio.update({ elapsed, ...editAtmosphere });
-    updateHorizonCulling();
     if (selectedItem) {
       // pulse the highlight ring so the selection is obvious
       selectRing.material.opacity = 0.6 + Math.abs(Math.sin(elapsed * 4)) * 0.4;
@@ -5901,13 +7974,12 @@ function animate() {
       composer.render();
       publishDevMetrics(elapsed);
     }
-    requestAnimationFrame(animate);
     return;
   }
 
   // ---- movement input: W/S = forward/backstep along facing · A/D = turn ----
   let fwd = 0, turn = 0;
-  if (experienceMode === 'explore') {
+  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen()) {
     if (keys['w'] || keys['arrowup'])    fwd += 1;
     if (keys['s'] || keys['arrowdown'])  fwd -= 1;
     if (keys['a'] || keys['arrowleft'])  turn += 1;
@@ -5918,6 +7990,7 @@ function animate() {
     turn += gamepad.turn;
   }
   const moveMag = Math.min(1, Math.abs(fwd));
+  let playerMoved = false;
 
   // any movement input releases the agent-focus camera and closes overlays
   if (Math.abs(fwd) > 0.001 || Math.abs(turn) > 0.001) {
@@ -5925,6 +7998,7 @@ function animate() {
     if (focusNpc) {
       focusNpc = null;
       focusSide = null;
+      trackCameraTransition = false;
       dashboardCloseCard();
     }
     dashboardCloseTeam();
@@ -5932,7 +8006,7 @@ function animate() {
   }
 
   // ---- jump physics (vertical hop above the surface) ----
-  if (experienceMode === 'explore' && jumpRequested && onGround) {
+  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen() && !activeBoatItem && jumpRequested && onGround) {
     jumpVel = JUMP_SPEED; onGround = false;
   }
   jumpRequested = false;
@@ -5956,22 +8030,30 @@ function animate() {
   if (Math.abs(fwd) > 0.001) {
     keepPlayerForwardTangent();
     const travel = playerForward.clone().multiplyScalar(Math.sign(fwd));
-    const axis = new THREE.Vector3().crossVectors(playerDir, travel).normalize();
-    _q.setFromAxisAngle(axis, moveMag * WALK * dt);
-    const nextDir = playerDir.clone().applyQuaternion(_q).normalize();
-    if (!isBlockedSurfaceDir(nextDir)) {
-      playerDir.copy(nextDir);
-      playerForward.applyQuaternion(_q);
-      camDir.applyQuaternion(_q);                      // parallel-transport the camera anchor
-      keepPlayerForwardTangent();
-    }
+    playerMoved = tryMovePlayerOnSurface(travel, moveMag * (activeBoatItem ? SAIL : WALK) * dt);
+  }
+
+  // Keep a comfortable point behind the visitor as a recovery anchor. When a
+  // layout edit or a narrow collider wedge leaves too few exits, recover after
+  // a short grace period; simply walking into one wall never teleports anyone.
+  const playerClear = playerSurfaceAllowed(playerDir)
+    && hasSurfaceClearance(playerDir, PLAYER_CLEARANCE_RADIUS);
+  const roomyClearance = surfaceColliderClearance(playerDir) > PLAYER_CLEARANCE_RADIUS + 0.035;
+  if (!activeBoatItem && playerClear && roomyClearance) lastSafePlayerDir.copy(playerDir);
+  let needsRecovery = !playerClear;
+  if (!needsRecovery && Math.abs(fwd) > 0.001 && !playerMoved) {
+    lastPlayerEscapeOptions = playerEscapeOptionCount(playerDir);
+    needsRecovery = lastPlayerEscapeOptions <= 1;
+  }
+  playerBlockedFor = needsRecovery ? playerBlockedFor + dt : 0;
+  if (playerBlockedFor > 0.42) {
+    recoverPlayerToSafeSurface({ notify: true });
   }
 
   // ---- place & orient the player on the surface (+ jump height along up) ----
   const { up } = tangentBasis(playerDir);
-  const inWater = isInWaterDir(playerDir);
-  const waterSink = inWater ? -0.24 + Math.sin(elapsed * 7) * 0.025 : 0;
-  player.position.copy(playerDir.clone().multiplyScalar(terrainRadius(playerDir) + 0.05 + jumpHeight + waterSink));
+  player.position.copy(playerDir.clone().multiplyScalar(terrainRadius(playerDir) + 0.05 + jumpHeight));
+  if (activeBoatItem) syncActiveBoatTransform();
   // face along the transported tangent vector, standing up along `up`
   keepPlayerForwardTangent();
   const face = playerForward.clone();
@@ -5982,9 +8064,10 @@ function animate() {
 
   // little bob while walking
   playerStride += ((moveMag > 0.001 ? moveMag : 0) - playerStride) * Math.min(1, dt * 10);
-  body.position.y = playerStride * Math.abs(Math.sin(elapsed * 9)) * 0.05 - (inWater ? 0.08 : 0);
+  const playerInWater = !activeBoatItem && isInWaterDir(playerDir);
+  body.position.y = playerStride * Math.abs(Math.sin(elapsed * 9)) * 0.05 - (playerInWater ? 0.08 : 0);
   animateCharacterWalk(player, playerStride, elapsed);
-  updateCharacterContactShadow(player, jumpHeight, playerStride, inWater);
+  updateCharacterContactShadow(player, jumpHeight, playerStride, playerInWater);
 
   // ---- 집 문 앞 감지: 가까우면 입장 프롬프트가 뜬다 (F / 탭) ----
   updateServiceProximity();
@@ -6024,30 +8107,55 @@ function animate() {
       ));
       _focusLookTarget.lerp(_focusHomePosition, lighthouseFocus ? 0.42 : 0.24);
     }
-    camera.position.lerp(focusTarget, 1 - Math.pow(0.02, dt));
-    camera.up.copy(nUp);
-    camera.lookAt(_focusLookTarget);
+    const focusAlpha = 1 - Math.pow(0.02, dt);
+    moveCameraAroundPlanet(focusTarget, focusAlpha);
+    camera.up.lerp(nUp, focusAlpha).normalize();
+    // On an opposite-side focus, aiming at the destination immediately makes
+    // the globe fill the frame even though the camera itself stays outside it.
+    // Follow the currently visible surface first, then hand the gaze to the
+    // agent once the destination hemisphere is in view.
+    _focusCameraDir.copy(camera.position).normalize();
+    const destinationVisibility = _focusCameraDir.dot(nUp);
+    const destinationBlend = THREE.MathUtils.smoothstep(destinationVisibility, 0.18, 0.72);
+    _focusTransitLookTarget.copy(_focusCameraDir)
+      .multiplyScalar(dashboardLookHeight())
+      .lerp(_focusLookTarget, destinationBlend);
+    camera.lookAt(_focusTransitLookTarget);
   } else {
     // the camera hangs behind its own anchor (camDir) — the character running
     // sideways doesn't swing the view; only dragging rotates it
-    const back = camDir.clone().multiplyScalar(-1);
+    const dashboard = experienceMode === 'dashboard';
+    const cameraUp = dashboard ? DASHBOARD_VIEW_DIR.clone().applyAxisAngle(dashboardOrbitAxis, dashboardYaw) : up;
+    const cameraForward = dashboard ? DASHBOARD_VIEW_FORWARD.clone().applyAxisAngle(dashboardOrbitAxis, dashboardYaw) : camDir;
+    const back = cameraForward.clone().multiplyScalar(-1);
     // In dashboard mode the planet gets a very small cinematic sway and
     // breathing zoom. It is deliberately bounded, so labels and click targets
     // stay stable while the overview feels alive.
     const dashboardSway = experienceMode === 'dashboard' && !dragging
       ? Math.sin(elapsed * 0.11) * 0.055
       : 0;
-    if (dashboardSway) back.applyAxisAngle(up, dashboardSway);
+    if (dashboardSway) back.applyAxisAngle(cameraUp, dashboardSway);
     const viewDist = camDist + (experienceMode === 'dashboard' ? Math.sin(elapsed * 0.16) * 0.16 : 0);
-    const camOffset = up.clone().multiplyScalar(Math.sin(camPitch) * viewDist)
+    const camOffset = cameraUp.clone().multiplyScalar(Math.sin(camPitch) * viewDist)
                       .add(back.multiplyScalar(Math.cos(camPitch) * viewDist));
-    const dashboard = experienceMode === 'dashboard';
     const camTarget = dashboard ? camOffset : player.position.clone().add(camOffset);
-    camera.position.lerp(camTarget, 1 - Math.pow(0.001, dt));
-    camera.up.copy(up);
-    camera.lookAt(dashboard
-      ? up.clone().multiplyScalar(dashboardLookHeight())
-      : player.position.clone().add(up.clone().multiplyScalar(0.8)));
+    const followAlpha = 1 - Math.pow(0.001, dt);
+    if (dashboard) moveCameraAroundPlanet(camTarget, followAlpha);
+    else camera.position.lerp(camTarget, followAlpha);
+    camera.up.lerp(cameraUp, followAlpha).normalize();
+    if (dashboard) {
+      const lookHeight = dashboardLookHeight();
+      _focusCameraDir.copy(camera.position).normalize();
+      const destinationBlend = THREE.MathUtils.smoothstep(
+        _focusCameraDir.dot(cameraUp), 0.18, 0.70,
+      );
+      _focusLookTarget.copy(cameraUp).multiplyScalar(lookHeight);
+      _focusTransitLookTarget.copy(_focusCameraDir).multiplyScalar(lookHeight)
+        .lerp(_focusLookTarget, destinationBlend);
+      camera.lookAt(_focusTransitLookTarget);
+    } else {
+      camera.lookAt(player.position.clone().add(up.clone().multiplyScalar(0.8)));
+    }
   }
 
   // ---- animate DOM emoji bubbles (float up & fade) ----
@@ -6066,9 +8174,9 @@ function animate() {
   updateNPCs(dt);
   skySystem.update({ dt, elapsed, playerDirection: playerDir });
   const atmosphere = skySystem.ambientState();
+  updateHorizonCulling();
   updateAmbientScene(elapsed, atmosphere);
   ambientAudio.update({ elapsed, ...atmosphere });
-  updateHorizonCulling();
   updateWorldLabels();
 
   // Argos's lighthouse works as a live status landmark: the gold beam only
@@ -6081,7 +8189,6 @@ function animate() {
     composer.render();
     publishDevMetrics(elapsed);
   }
-  requestAnimationFrame(animate);
 }
 
 addEventListener('resize', () => {
@@ -6097,7 +8204,19 @@ addEventListener('resize', () => {
 
 // kick off — start the render loop immediately so the intro shows a live world behind it,
 // then enable the Start button and let the user dismiss the intro with a soft fade.
-animate();
+const worldLoop = createVisibilityLoop({
+  frame: animate,
+  blocked: () => webglContextLost,
+  onPause: () => {
+    for (const key of Object.keys(keys)) keys[key] = false;
+    stickVec.x = 0;
+    stickVec.y = 0;
+    jumpRequested = false;
+  },
+});
+renderer.domElement.addEventListener('webglcontextlost', () => worldLoop.refresh());
+renderer.domElement.addEventListener('webglcontextrestored', () => worldLoop.refresh());
+worldLoop.start();
 
 startBtn.disabled = false;
 startBtn.textContent = '에이전트 관제하기';
@@ -6122,6 +8241,7 @@ addEventListener('mini-planet-update-ready', () => showAppNotice('새 버전의 
 }));
 
 function beginGame(mode = 'dashboard', { cinematic = true } = {}) {
+  roseLabel.element.inert = false;
   setExperienceMode(mode);
   if (cinematic) startCameraIntro();
   else cameraIntro = null;
@@ -6288,7 +8408,14 @@ addEventListener('keydown', anyKeyStart);
     hintTimer = setTimeout(() => hintEl.classList.remove('show'), 2200);
   }
 
-  const PATH_NAMES = { road: '🛣️ 도로', river: '🌊 물길', trail: '🛤️ 흙길', snow: '❄️ 눈길', pond: '🏞️ 연못', sand: '🏖️ 모래밭', grass: '🌿 풀밭' };
+  const PATH_NAMES = {
+    road: '🛣️ 도로', lane: '🧱 마을 골목', river: '🌊 물길', trail: '🛤️ 흙길',
+    snow: '❄️ 눈길', pond: '🏞️ 연못', sand: '🏖️ 모래밭', grass: '🌿 풀밭',
+    island: '🏝️ 섬', sea: '🌐 바다', deck: '▦ 데크', market: '⚑ 어시장',
+    breakwater: '▰ 방파제', wave: '≋ 파도', camellia: '✿ 동백길',
+    streetEdge: '▱ 도로 연석', laneEdge: '▱ 골목 연석', hedge: '♧ 생울타리',
+    quayRail: '⌇ 부두 난간', courtyard: '▦ 건물 앞마당',
+  };
 
   // editor -> UI callbacks (referenced by name inside the editor module)
   window.onSelectionChanged = (item) => {
@@ -6343,7 +8470,7 @@ addEventListener('keydown', anyKeyStart);
       setEditorCollapsed(false);
       setEditorTab('objects');
       editorBar.querySelector('.editor-manage')?.removeAttribute('open');
-      flashHint('클릭 선택 · 드래그 이동 · WASD/방향키 시점 이동 · Ctrl+D 복제 · Ctrl/⌘+Z 실행취소');
+      flashHint('편집 내용은 이 브라우저에만 저장됩니다 · 공개 홈페이지 원본은 변경되지 않습니다');
       requestAnimationFrame(() => exitBtn?.focus());
     }
     else {
@@ -6364,9 +8491,17 @@ addEventListener('keydown', anyKeyStart);
   window.onLayoutQualityChanged = (audit) => {
     if (!audit) return;
     const label = audit.status === 'ready'
-      ? `배치 ${audit.score}`
+      ? `기능 검사 ${audit.score}`
       : audit.status === 'review' ? `배치 검토 ${audit.score}` : `배치 차단 ${audit.score}`;
-    const details = [...audit.errors, ...audit.warnings];
+    const placementDetails = [
+      ...(audit.homeClearance || []).map((issue) =>
+        `${issue.a}↔${issue.b} 시야 ${issue.distance.toFixed(1)}m`),
+      ...(audit.doorObstructions || []).map((issue) =>
+        `${issue.owner} 진입로: ${issue.obstacleType} ${issue.distance.toFixed(1)}m`),
+      ...(audit.overlaps || []).map((issue) =>
+        `${issue.aType}↔${issue.bType} ${issue.distance.toFixed(1)}m`),
+    ];
+    const details = [...audit.errors, ...audit.warnings, ...placementDetails];
     if (qualityEl) {
       qualityEl.className = `editor-quality ${audit.status}`;
       qualityEl.textContent = label;
@@ -6940,9 +9075,15 @@ addEventListener('keydown', anyKeyStart);
     agentCardOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     renderCard(a);
     cardEl.classList.add('show');
+    if (focus) ambientAudio.playEffect('open');
     setInteractiveState(cardEl, true);
     document.body.classList.add('agent-detail-open');
-    if (!editMode && a.npc) { focusNpc = a.npc; focusSide = null; }   // camera glides over
+    if (!editMode && a.npc) {
+      focusNpc = a.npc;
+      focusSide = null;
+      cameraTransitionMinClearance = Infinity;
+      trackCameraTransition = true;
+    }   // camera glides over
     if (focus) requestAnimationFrame(() => el('agentCardClose')?.focus());
   }
   function closeAgentCard(restoreFocus = false) {
@@ -6953,6 +9094,7 @@ addEventListener('keydown', anyKeyStart);
     document.body.classList.remove('agent-detail-open');
     focusNpc = null;                             // camera returns to the player
     focusSide = null;
+    trackCameraTransition = false;
     if (restoreFocus && wasOpen) agentCardOpener?.isConnected && agentCardOpener.focus();
     agentCardOpener = null;
   }
@@ -7083,16 +9225,30 @@ addEventListener('keydown', anyKeyStart);
   // ---- 3D에서 에이전트 클릭 → 카드 (플레이 모드 전용) ----
   let clickStart = null;
   renderer.domElement.addEventListener('pointerdown', (e) => {
-    if (editMode) return;
-    clickStart = { x: e.clientX, y: e.clientY };
+    if (editMode || e.button !== 0) return;
+    clickStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
   });
+  addEventListener('pointercancel', () => { clickStart = null; });
   addEventListener('pointerup', (e) => {
     if (editMode || !clickStart) return;
+    if (e.pointerId !== clickStart.pointerId) { clickStart = null; return; }
     const moved = Math.hypot(e.clientX - clickStart.x, e.clientY - clickStart.y);
     clickStart = null;
-    if (moved > 6) return;                       // it was a camera drag, not a click
+    if (moved > 6 || e.target !== renderer.domElement) return;
     setPointerNDC(e);
     raycaster.setFromCamera(pointerNDC, camera);
+    const roseHit = poleRose.visible && raycaster.intersectObject(poleRose, true)[0];
+    if (roseHit && !raycaster.intersectObjects([planet, ...npcs.filter((npc) => npc.visible),
+      ...editables.filter((item) => item.mesh.visible).map((item) => item.mesh)], true)
+      .some((hit) => hit.distance < roseHit.distance - 0.01)) {
+      openRoseStory(); return;
+    }
+    const boards = editables.filter((item) => item.data.type === 'resultBoard' && item.mesh.visible);
+    const boardHits = raycaster.intersectObjects(boards.map((item) => item.mesh), true);
+    if (boardHits.length && !raycaster.intersectObjects([planet, ...npcs, ...editables.filter((item) => item.data.type !== 'resultBoard' && item.mesh.visible)
+      .map((item) => item.mesh)], true).some((hit) => hit.distance < boardHits[0].distance)) {
+      villageBoard.open(); return;
+    }
     const hits = raycaster.intersectObjects(npcs, true);
     if (hits.length) {
       let obj = hits[0].object;
@@ -7540,6 +9696,8 @@ addEventListener('keydown', anyKeyStart);
   const mobileInteractBtn = el('mobileInteractBtn');
   let openFor = null;          // agent whose panel is open
   let nearAgent = null;        // agent whose door we're standing at
+  let nearBoat = null;
+  let interactionPromptKey = '';
   let servicePanelOpener = null;
   let reachSeq = 0;
 
@@ -7651,6 +9809,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   openServicePanel = function (a, { tab = 'service' } = {}) {
+    ambientAudio.playEffect('open');
     dashboardStopPatrol();
     closeVisitorPanels();
     dashboardCloseTeam();
@@ -7744,25 +9903,51 @@ addEventListener('keydown', anyKeyStart);
   const ENTER_ANGLE = 0.18;
   updateServiceProximity = function () {
     let best = null, bestD = ENTER_ANGLE;
+    let boat = activeBoatItem;
     if (!editMode && !openFor && experienceMode === 'explore') {
-      for (const a of AGENTS) {
-        const doorDir = homeDoorDir(a.home);
-        if (!doorDir) continue;
-        const d = playerDir.angleTo(doorDir);
-        if (d < bestD) { best = a; bestD = d; }
+      if (!boat) boat = nearestBoardableBoat();
+      if (!boat) {
+        for (const a of AGENTS) {
+          const doorDir = homeDoorDir(a.home);
+          if (!doorDir) continue;
+          const d = playerDir.angleTo(doorDir);
+          if (d < bestD) { best = a; bestD = d; }
+        }
       }
     }
+    const promptKey = activeBoatItem ? 'boat-exit' : boat ? 'boat-enter' : best?.key || '';
+    nearAgent = best;
+    nearBoat = boat;
+    if (promptKey === interactionPromptKey) return;
+    interactionPromptKey = promptKey;
     if (mobileInteractBtn) {
-      mobileInteractBtn.disabled = !best;
-      const label = best
-        ? (best.service?.name || best.kor + '의 집') + ' 입장'
-        : '가까운 집 입장';
+      mobileInteractBtn.disabled = !promptKey;
+      const label = activeBoatItem
+        ? '배에서 내리기'
+        : boat
+          ? '어선 승선'
+          : best
+            ? (best.service?.name || best.kor + '의 집') + ' 입장'
+            : '가까운 집 또는 배 이용';
       mobileInteractBtn.setAttribute('aria-label', label);
       mobileInteractBtn.title = label;
+      const icon = mobileInteractBtn.querySelector('span');
+      if (icon) icon.textContent = activeBoatItem || boat ? '⛵' : '⌂';
     }
-    if (best === nearAgent) return;
-    nearAgent = best;
-    if (best) {
+    if (activeBoatItem || boat) {
+      promptEl.textContent = '';
+      const icon = document.createElement('span');
+      icon.textContent = '⛵ ';
+      const label = document.createElement('b');
+      label.textContent = activeBoatItem ? '배에서 내리기' : '어선 승선';
+      const hint = document.createElement('span');
+      hint.className = 'enter-key';
+      hint.textContent = activeBoatItem ? 'F 하선' : 'F 승선';
+      promptEl.append(icon, label, hint);
+      promptEl.classList.add('show');
+      promptEl.tabIndex = 0;
+      setInteractiveState(promptEl, true);
+    } else if (best) {
       const svc = best.service;
       promptEl.textContent = '';
       const door = document.createElement('span');
@@ -7783,14 +9968,20 @@ addEventListener('keydown', anyKeyStart);
     }
   };
   activateNearbyService = () => {
-    if (!nearAgent || editMode || openFor || experienceMode !== 'explore') return false;
+    if (editMode || openFor || villageBoard.isOpen() || roseStory.isOpen() || experienceMode !== 'explore') return false;
+    if (activeBoatItem) return disembarkBoat();
+    if (nearBoat) return boardBoat(nearBoat);
+    if (!nearAgent) return false;
     openServicePanel(nearAgent);
     return true;
   };
   promptEl.addEventListener('click', activateNearbyService);
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (k === 'f' && !isUiInteractionTarget(e.target)) activateNearbyService();
+    // Korean IMEs may report either the consonant or Process with KeyF.
+    const boatKey = (activeBoatItem || nearBoat) && (k === '\u3139' || e.code === 'KeyF');
+    if ((k === 'f' || boatKey) && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
+        && !isUiInteractionTarget(e.target)) activateNearbyService();
     else if (k === 'escape') closeServicePanel(true);
   });
 })();
@@ -7802,6 +9993,26 @@ addEventListener('keydown', anyKeyStart);
 // Handy for checking far-side builds without walking half the globe.
 // ---------------------------------------------------------------------------
 if (URL_PARAMS.has('dev')) {
+  const reviewOrbit = Number(URL_PARAMS.get('qaOrbit'));
+  if (Number.isFinite(reviewOrbit)) dashboardYaw = wrappedAngle(reviewOrbit);
+  if (URL_PARAMS.get('qaPole') === 'south') {
+    DASHBOARD_VIEW_DIR.set(0, -1, 0);
+    DASHBOARD_VIEW_FORWARD.set(0, 0, 1);
+  }
+  if (URL_PARAMS.get('qaView') === 'dashboard') {
+    queueMicrotask(() => startBtn.click());
+  } else if (URL_PARAMS.get('qaView') === 'explore') {
+    queueMicrotask(() => document.getElementById('exploreModeBtn')?.click());
+  } else if (URL_PARAMS.get('qaView') === 'rose') {
+    queueMicrotask(() => {
+      beginGame('explore', { cinematic: false });
+      commitPlayerSurfaceDirection(offsetSurfaceDir(NORTH_POLE, new THREE.Vector3(1, 0, 0), 0.20));
+      playerForward.copy(NORTH_POLE).addScaledVector(playerDir, -NORTH_POLE.dot(playerDir)).normalize();
+      camDir.copy(playerForward);
+      camDist = 7;
+      camPitch = 0.42;
+    });
+  }
   const objectScreenState = (object, opacity = 1) => {
     const ndc = object.getWorldPosition(new THREE.Vector3()).project(camera);
     return {
@@ -7829,6 +10040,28 @@ if (URL_PARAMS.has('dev')) {
     layoutAudit() {
       return currentLayoutAudit();
     },
+    homeStreetAccessState() {
+      const homes = editables.filter((item) => HOME_PROP_TYPES.has(item.data.type));
+      const connections = homes.map((home) => {
+        const link = drivewayConnections.find((item) => item.home === home);
+        return {
+          key: home.data.ownerKey || '',
+          connected: !!link,
+          streetType: link?.streetType || null,
+          length: link ? +link.length.toFixed(3) : null,
+        };
+      });
+      return {
+        homes: homes.length,
+        connected: connections.filter((item) => item.connected).length,
+        longest: connections.reduce((max, item) => Math.max(max, item.length || 0), 0),
+        connections,
+        pass: homes.length === AGENTS.length
+          && connections.every((item) => item.connected && item.length > 0.02 && item.length <= 2.2),
+      };
+    },
+    roadClearanceState,
+    sharedHarborState,
     operationsCore() {
       return editables
         .filter((item) => item.data.type === 'opsBeacon')
@@ -7878,6 +10111,58 @@ if (URL_PARAMS.has('dev')) {
         childMeshes: agent.npc?.getObjectsByProperty('isMesh', true).length || 0,
       }));
     },
+    districtState() {
+      const infrastructureTypes = ['streetEdge', 'laneEdge', 'hedge', 'quayRail'];
+      const paths = Object.fromEntries(infrastructureTypes.map((type) => [
+        type,
+        editablePaths.filter((item) => item.data.type === type).length,
+      ]));
+      const profiles = editables
+        .filter((item) => item.data.type === 'cottage')
+        .map((item) => item.mesh.userData.architectureProfile)
+        .filter(Boolean);
+      const homes = editables.filter((item) => item.data.ownerKey && HOME_PROP_TYPES.has(item.data.type));
+      const distances = homes.flatMap((a, i) => homes.slice(i + 1).map((b) => a.dir.angleTo(b.dir) * R));
+      const minimumHomeDistance = distances.length ? Math.min(...distances) : 0;
+      const rearHemisphereHomes = homes.filter((home) => home.dir.dot(MAP_CENTER) < 0).length;
+      return {
+        paths,
+        architectureProfiles: [...new Set(profiles)].sort(),
+        cottageHomes: profiles.length,
+        minimumHomeDistance: +minimumHomeDistance.toFixed(3),
+        rearHemisphereHomes,
+        homeDirections: homes.map((home) => ({ key: home.data.ownerKey, n: home.dir.toArray() })),
+        pass: paths.streetEdge >= 2
+          && paths.laneEdge >= 2
+          && paths.hedge >= 2
+          && paths.quayRail >= 2
+          && new Set(profiles).size >= 3
+          && minimumHomeDistance >= 6
+          && rearHemisphereHomes >= 3,
+      };
+    },
+    worldScaleState() {
+      const visitorHeight = player.userData.modelHeight * player.scale.y;
+      const homes = AGENTS
+        .filter((agent) => agent.home?.data.type === 'cottage')
+        .map((agent) => {
+          const spec = agent.home.mesh.userData.scaleSpec;
+          const agentHeight = agent.npc.userData.modelHeight * agent.npc.scale.y;
+          return {
+            key: agent.key,
+            profile: spec?.profile || null,
+            doorHeight: +(spec?.doorHeight || 0).toFixed(3),
+            agentHeight: +agentHeight.toFixed(3),
+            doorToAgent: spec ? +(spec.doorHeight / agentHeight).toFixed(2) : null,
+          };
+        });
+      return {
+        visitorHeight: +visitorHeight.toFixed(3),
+        roadWidth: 0.90,
+        laneWidth: 0.70,
+        homes,
+      };
+    },
     mobilityState() {
       return AGENTS.map((agent) => {
         const dir = agent.npc?.userData?.dir;
@@ -7893,6 +10178,256 @@ if (URL_PARAMS.has('dev')) {
         };
       });
     },
+    playerMobilityState() {
+      const clearance = surfaceColliderClearance(playerDir);
+      return {
+        aboard: !!activeBoatItem,
+        blocked: !hasSurfaceClearance(playerDir, PLAYER_CLEARANCE_RADIUS),
+        terrainAllowed: playerSurfaceAllowed(playerDir),
+        clearance: Number.isFinite(clearance) ? +(clearance * R).toFixed(3) : null,
+        requiredClearance: +(PLAYER_CLEARANCE_RADIUS * R).toFixed(3),
+        escapeOptions: playerEscapeOptionCount(playerDir),
+        blockedFor: +playerBlockedFor.toFixed(3),
+        recoveries: playerRecoveryCount,
+        spawnDistance: +(playerDir.angleTo(DEFAULT_PLAYER_SPAWN_DIR) * R).toFixed(3),
+      };
+    },
+    waterAccessState() {
+      const boats = editables.filter((item) => item.data.type === 'fishingBoat');
+      const sample = boats.find((item) => isWaterSurfaceDir(item.dir))?.dir || null;
+      const footAllowed = sample ? playerSurfaceAllowed(sample, false) : null;
+      const boatAllowed = sample ? playerSurfaceAllowed(sample, true) : null;
+      return {
+        boats: boats.length,
+        sampleInWater: sample ? isWaterSurfaceDir(sample) : null,
+        footAllowed,
+        boatAllowed,
+        aboard: !!activeBoatItem,
+        pass: !!sample && !footAllowed && boatAllowed,
+      };
+    },
+    marineEnvironmentState() {
+      const marineTypes = new Set(['fishingBoat', 'harborBuoy', 'channelBeacon', 'cargoFerry']);
+      const items = editables.filter((item) => marineTypes.has(item.data.type));
+      const waterborne = items.filter((item) => isWaterSurfaceDir(item.dir));
+      const mainBoat = items.find((item) => item.data.type === 'fishingBoat');
+      return {
+        objects: items.length,
+        waterborne: waterborne.length,
+        types: [...new Set(items.map((item) => item.data.type))].sort(),
+        mainBoatScale: mainBoat?.data.scale ?? null,
+        pass: items.length >= 4
+          && waterborne.length === items.length
+          && (mainBoat?.data.scale ?? 0) >= 1.25,
+      };
+    },
+    testHarborJourney() {
+      if (activeBoatItem) return { pass: false, reason: 'already-aboard' };
+      const boat = editables.find((p) => p.data.type === 'fishingBoat' && isWaterSurfaceDir(p.dir));
+      if (!boat) return { pass: false, reason: 'missing-boat' };
+      const original = {
+        player: playerDir.clone(), forward: playerForward.clone(), camera: camDir.clone(),
+        safe: lastSafePlayerDir.clone(), boat: boat.dir.clone(), yaw: boat.data.yaw,
+        visible: player.visible, label: player.userData.nameLabel?.enabled,
+        jumpVel, jumpHeight, onGround, playerBlockedFor,
+      };
+      const stages = {};
+      const travel = (points) => {
+        if (!points) return false;
+        for (const target of points) {
+          for (let steps = 0; playerDir.angleTo(target) > 0.002; steps++) {
+            if (steps > 400) return false;
+            const angle = Math.min(0.012, playerDir.angleTo(target));
+            const tangent = target.clone().sub(playerDir.clone().multiplyScalar(target.dot(playerDir)));
+            if (!tryMovePlayerOnSurface(tangent, angle)) return false;
+          }
+        }
+        if (activeBoatItem) syncActiveBoatTransform();
+        return true;
+      };
+      try {
+        commitPlayerSurfaceDirection(DEFAULT_PLAYER_SPAWN_DIR);
+        stages.walkToPier = travel([mapDir(0, -0.40), mapDir(-0.28, -0.41), mapDir(-0.30, -0.68)]);
+        if (!stages.walkToPier) return { pass: false, stages, reason: 'pier-approach-blocked' };
+        stages.boardFromPier = nearestBoardableBoat() === boat && boardBoat(boat);
+        if (!stages.boardFromPier) return { pass: false, stages, reason: 'boat-outside-pier-reach',
+          boatDirection: boat.dir.toArray(), distanceFromPier: +(playerDir.angleTo(boat.dir) * R).toFixed(3) };
+        const pierEnd = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR,
+          propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.68);
+        const mooring = offsetSurfaceDir(pierEnd, tangentBasis(pierEnd).east, 0.16);
+        const route = findSurfaceRoute(playerDir, mooring,
+          (dir) => playerSurfaceAllowed(dir, true) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS));
+        stages.sailToIsland = travel(route);
+        if (!stages.sailToIsland) return { pass: false, stages, reason: 'island-route-blocked' };
+        stages.landOnIsland = disembarkBoat({ notify: false });
+        if (!stages.landOnIsland) return { pass: false, stages, reason: 'island-landing-blocked' };
+        stages.reboard = nearestBoardableBoat() === boat && boardBoat(boat);
+        if (!stages.reboard) return { pass: false, stages, reason: 'island-reboarding-blocked' };
+        stages.sailHome = travel([...route].reverse());
+        stages.landAtHarbor = stages.sailHome && disembarkBoat({ notify: false });
+        if (!stages.landAtHarbor) return { pass: false, stages, reason: 'harbor-return-blocked' };
+        stages.walkHome = travel(findSurfaceRoute(playerDir, DEFAULT_PLAYER_SPAWN_DIR,
+          (dir) => playerSurfaceAllowed(dir, false) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS)));
+        return { pass: Object.values(stages).every(Boolean), stages,
+          routePoints: route.length, boatStartPreserved: true };
+      } finally {
+        activeBoatItem = null;
+        boat.data.dir.copy(original.boat); boat.data.yaw = original.yaw; applyPropTransform(boat);
+        playerDir.copy(original.player); playerForward.copy(original.forward); camDir.copy(original.camera);
+        lastSafePlayerDir.copy(original.safe); player.visible = original.visible;
+        if (player.userData.nameLabel) player.userData.nameLabel.enabled = original.label;
+        jumpVel = original.jumpVel; jumpHeight = original.jumpHeight; onGround = original.onGround;
+        playerBlockedFor = original.playerBlockedFor;
+        document.body.classList.remove('boat-mode');
+      }
+    },
+    testBoatLifecycle() {
+      if (activeBoatItem) return { boarded: false, aboard: false, disembarked: false, landed: false, pass: false };
+      const boat = editables.find((item) => item.data.type === 'fishingBoat' && isWaterSurfaceDir(item.dir));
+      if (!boat) return { boarded: false, aboard: false, disembarked: false, landed: false, pass: false };
+
+      const original = {
+        playerDir: playerDir.clone(),
+        playerForward: playerForward.clone(),
+        camDir: camDir.clone(),
+        lastSafePlayerDir: lastSafePlayerDir.clone(),
+        boatDir: boat.data.dir.clone(),
+        boatYaw: boat.data.yaw || 0,
+        playerVisible: player.visible,
+        labelEnabled: player.userData.nameLabel?.enabled,
+        jumpVel, jumpHeight, onGround, playerBlockedFor,
+      };
+      try {
+        // A saved boat may legitimately be offshore. Exercise landing at the
+        // islet's mooring without changing the user's saved boat position.
+        if (!nearestDryShoreDirection(boat.dir)) {
+          const pierEnd = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR, propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.68);
+          const mooring = offsetSurfaceDir(pierEnd, tangentBasis(pierEnd).east, 0.16);
+          if (!isWaterSurfaceDir(mooring) || !nearestDryShoreDirection(mooring)) {
+            return { boarded: false, aboard: false, disembarked: false, landed: false, pass: false, reason: 'no-safe-test-mooring' };
+          }
+          boat.data.dir.copy(mooring);
+          applyPropTransform(boat);
+        }
+        const boarded = boardBoat(boat);
+        const aboard = boarded
+          && activeBoatItem === boat
+          && !player.visible
+          && playerSurfaceAllowed(playerDir, true);
+        const disembarked = boarded && disembarkBoat({ notify: false });
+        const landed = disembarked
+          && !activeBoatItem
+          && !isInWaterDir(playerDir)
+          && playerSurfaceAllowed(playerDir, false);
+        return { boarded, aboard, disembarked, landed, pass: boarded && aboard && disembarked && landed };
+      } finally {
+        activeBoatItem = null;
+        boat.data.dir.copy(original.boatDir);
+        boat.data.yaw = original.boatYaw;
+        applyPropTransform(boat);
+        playerDir.copy(original.playerDir);
+        playerForward.copy(original.playerForward);
+        camDir.copy(original.camDir);
+        lastSafePlayerDir.copy(original.lastSafePlayerDir);
+        player.visible = original.playerVisible;
+        if (player.userData.nameLabel) player.userData.nameLabel.enabled = original.labelEnabled;
+        jumpVel = original.jumpVel;
+        jumpHeight = original.jumpHeight;
+        onGround = original.onGround;
+        playerBlockedFor = original.playerBlockedFor;
+        document.body.classList.remove('boat-mode');
+      }
+    },
+    boardFirstBoat() {
+      const boat = editables.find((item) => item.data.type === 'fishingBoat' && isWaterSurfaceDir(item.dir));
+      return { boarded: boardBoat(boat), state: this.waterAccessState() };
+    },
+    leaveBoat() {
+      return { disembarked: disembarkBoat({ notify: false }), state: this.waterAccessState() };
+    },
+    boatPosition() {
+      return activeBoatItem ? activeBoatItem.dir.toArray().map((value) => +value.toFixed(5)) : null;
+    },
+    townWalkability() {
+      const traps = [];
+      let walkable = 0;
+      // Cover the complete connected harbor city, including both new
+      // peninsulas. The former central-only rectangle missed outer homes and
+      // could report a healthy town while a district edge contained a trap.
+      for (let z = -0.72; z <= 1.12; z += 0.10) {
+        for (let x = -1.58; x <= 1.58; x += 0.10) {
+          const dir = mapDir(x, z);
+          if (!hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS) || isInWaterDir(dir)) continue;
+          walkable++;
+          const exits = playerEscapeOptionCount(dir, 0.038, 10);
+          if (exits <= 1) traps.push({ x: +x.toFixed(2), z: +z.toFixed(2), exits });
+        }
+      }
+      const neighborhoods = AGENTS.map((agent) => {
+        const home = agent.home?.dir;
+        if (!home) return { key: agent.key, samples: 0, traps: 1 };
+        const basis = tangentBasis(home);
+        let samples = 0, blockedPockets = 0;
+        for (let x = -0.4; x <= 0.401; x += 0.1) {
+          for (let z = -0.4; z <= 0.401; z += 0.1) {
+            const dir = home.clone().addScaledVector(basis.east, x).addScaledVector(basis.north, z).normalize();
+            if (isInWaterDir(dir) || !hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS)) continue;
+            samples++;
+            if (playerEscapeOptionCount(dir, 0.038, 10) <= 1) blockedPockets++;
+          }
+        }
+        return { key: agent.key, samples, traps: blockedPockets };
+      });
+      const anchors = AGENTS.map((agent) => {
+        const dir = agent.workDir || agent.home?.dir || null;
+        if (!dir) return { key: agent.key, valid: false, reason: 'missing' };
+        const inWater = isInWaterDir(dir);
+        const blocked = !hasSurfaceClearance(dir, 0.015);
+        const exits = playerEscapeOptionCount(dir, 0.038, 10);
+        return { key: agent.key, valid: !inWater && !blocked && exits >= 2, inWater, blocked, exits };
+      });
+      return {
+        walkable,
+        traps,
+        neighborhoods,
+        anchors,
+        pass: traps.length === 0 && anchors.every((anchor) => anchor.valid)
+          && neighborhoods.every((area) => area.samples > 0 && area.traps === 0),
+      };
+    },
+    terrainCoverage(sampleCount = 4096) {
+      return terrainCoverageSummary(sampleCount);
+    },
+    testPlayerRecovery() {
+      const original = {
+        dir: playerDir.clone(),
+        forward: playerForward.clone(),
+        camera: camDir.clone(),
+        safe: lastSafePlayerDir.clone(),
+        blockedFor: playerBlockedFor,
+        recoveries: playerRecoveryCount,
+      };
+      const results = getSurfaceColliders().map((collider) => {
+        playerDir.copy(collider.dir);
+        const before = hasSurfaceClearance(playerDir, PLAYER_CLEARANCE_RADIUS);
+        const recovered = recoverPlayerToSafeSurface({ notify: false });
+        return {
+          label: collider.label,
+          startedClear: before,
+          recovered,
+          clear: hasSurfaceClearance(playerDir, PLAYER_CLEARANCE_RADIUS),
+          exits: playerEscapeOptionCount(playerDir),
+        };
+      });
+      playerDir.copy(original.dir);
+      playerForward.copy(original.forward);
+      camDir.copy(original.camera);
+      lastSafePlayerDir.copy(original.safe);
+      playerBlockedFor = original.blockedFor;
+      playerRecoveryCount = original.recoveries;
+      keepPlayerForwardTangent();
+      return results;
+    },
     setAgentState(key, state, task = '') {
       const agent = AGENTS.find((item) => item.key === key);
       if (!agent) return null;
@@ -7905,11 +10440,18 @@ if (URL_PARAMS.has('dev')) {
     },
     cameraState() {
       const focusedHome = focusNpc?.userData.agent?.home?.mesh || null;
+      const cameraRadius = camera.position.length();
       return {
         camDist: +camDist.toFixed(3),
         camPitch: +camPitch.toFixed(3),
+        cameraRadius: +cameraRadius.toFixed(3),
+        planetClearance: +(cameraRadius - R).toFixed(3),
+        transitionMinClearance: Number.isFinite(cameraTransitionMinClearance)
+          ? +cameraTransitionMinClearance.toFixed(3)
+          : null,
         cinematic: !!cameraIntro,
         mode: experienceMode,
+        dashboardYaw: +dashboardYaw.toFixed(3),
         playerDirection: playerDir.toArray().map(value => +value.toFixed(4)),
         focusedAgent: focusNpc?.userData.agent?.key || null,
         agentScreen: focusNpc ? objectScreenState(focusNpc) : null,
@@ -7960,6 +10502,40 @@ if (URL_PARAMS.has('dev')) {
     },
     performanceState() {
       return { ...performanceGovernor.state(), ...horizonCulling };
+    },
+    renderStructureState() {
+      const summarize = (root) => {
+        const result = { meshes: 0, batches: 0, shadowCasters: 0 };
+        root?.traverseVisible?.((object) => {
+          if (!object.isMesh) return;
+          result.meshes++;
+          const groups = object.geometry?.groups?.length || 0;
+          result.batches += Array.isArray(object.material) ? Math.max(1, groups) : 1;
+          if (object.castShadow) result.shadowCasters++;
+        });
+        return result;
+      };
+      const add = (target, value) => {
+        target.meshes += value.meshes;
+        target.batches += value.batches;
+        target.shadowCasters += value.shadowCasters;
+      };
+      const propTypes = {};
+      for (const item of editables) {
+        const state = summarize(item.mesh);
+        const aggregate = propTypes[item.data.type]
+          || (propTypes[item.data.type] = { count: 0, meshes: 0, batches: 0, shadowCasters: 0 });
+        aggregate.count++;
+        add(aggregate, state);
+      }
+      const agentTypes = {};
+      for (const agent of AGENTS) agentTypes[agent.key] = summarize(agent.npc);
+      return {
+        scene: summarize(scene),
+        props: Object.fromEntries(Object.entries(propTypes)
+          .sort((a, b) => b[1].batches - a[1].batches)),
+        agents: agentTypes,
+      };
     },
     setQuality(tier) {
       return performanceGovernor.setTier(tier);
@@ -8079,10 +10655,91 @@ if (URL_PARAMS.has('dev')) {
   if (URL_PARAMS.get('qa') === '1') {
     queueMicrotask(() => {
       const homes = window.devPlanet.testAllHomes();
+      const coverage = window.devPlanet.terrainCoverage();
+      const waterAccess = window.devPlanet.waterAccessState();
+      const boatLifecycle = window.devPlanet.testBoatLifecycle();
+      const marineEnvironment = window.devPlanet.marineEnvironmentState();
+      const homeStreetAccess = window.devPlanet.homeStreetAccessState();
+      const district = window.devPlanet.districtState();
+      const roadClearance = roadClearanceState();
+      const sharedHarbor = sharedHarborState();
+      const journey = window.devPlanet.testHarborJourney();
+      document.documentElement.dataset.qaHarborJourney = JSON.stringify(journey);
+      document.documentElement.dataset.qaSpatialStructure = JSON.stringify({
+        sites: editablePaths.filter((p) => p.data.districtId).map((p) => ({ id: p.data.id, district: p.data.districtId, type: p.data.type })),
+        objectCount: editables.length,
+      });
+      const routes = editablePaths.filter((p) => ['road', 'lane'].includes(p.data.type))
+        .map((p) => splineDirs(p.data.dirs, { step: 0.012 }).dirs);
+      const mainland = routes.filter((points) => points.some((p) => p.y > 0));
+      const network = streetNetworkState(mainland);
+      document.documentElement.dataset.qaStreetNetwork = JSON.stringify({
+        mainlandPaths: mainland.length, islandPaths: routes.length - mainland.length, ...network,
+      });
       document.documentElement.dataset.qaHomes = JSON.stringify(homes);
       document.documentElement.dataset.qaCharacters = JSON.stringify(window.devPlanet.characters());
       document.documentElement.dataset.qaLayout = JSON.stringify(window.devPlanet.layoutAudit());
-      document.documentElement.dataset.qaReady = homes.every((item) => item.ok) ? 'pass' : 'fail';
+      document.documentElement.dataset.qaPlayerMobility = JSON.stringify(window.devPlanet.playerMobilityState());
+      document.documentElement.dataset.qaWalkability = JSON.stringify(window.devPlanet.townWalkability());
+      document.documentElement.dataset.qaTerrainCoverage = JSON.stringify(coverage);
+      document.documentElement.dataset.qaWaterAccess = JSON.stringify(waterAccess);
+      document.documentElement.dataset.qaBoatLifecycle = JSON.stringify(boatLifecycle);
+      document.documentElement.dataset.qaMarineEnvironment = JSON.stringify(marineEnvironment);
+      document.documentElement.dataset.qaHomeStreetAccess = JSON.stringify(homeStreetAccess);
+      document.documentElement.dataset.qaDistrict = JSON.stringify(district);
+      document.documentElement.dataset.qaRoadClearance = JSON.stringify(roadClearance);
+      document.documentElement.dataset.qaSharedHarbor = JSON.stringify(sharedHarbor);
+      document.documentElement.dataset.qaScale = JSON.stringify(window.devPlanet.worldScaleState());
+      document.documentElement.dataset.qaRenderStructure = JSON.stringify(window.devPlanet.renderStructureState());
+      document.documentElement.dataset.qaLayoutReview = JSON.stringify({
+        radius: R,
+        reference: MAP_CENTER.toArray(),
+        spawn: DEFAULT_PLAYER_SPAWN_DIR.toArray(),
+        rose: NORTH_POLE.toArray(),
+        props: editables.map((item) => ({ type: item.data.type, owner: item.data.ownerKey || null,
+          n: item.dir.toArray(), scale: item.data.scale || 1 })),
+        distances: AGENTS.flatMap((a, i) => AGENTS.slice(i + 1).map((b) => ({
+          a: a.key, b: b.key, arc: +(a.home.dir.angleTo(b.home.dir) * R).toFixed(3),
+        }))),
+        routes: editablePaths.filter((p) => ['road', 'lane', 'deck'].includes(p.data.type)).map((p) => {
+          const points = splineDirs(p.data.dirs, { step: 0.012 }).dirs;
+          return { type: p.data.type, id: p.data.id || '', start: points[0].toArray(),
+            end: points.at(-1).toArray(), length: +points.slice(1).reduce((sum, dir, i) => sum + dir.angleTo(points[i]) * R, 0).toFixed(3) };
+        }),
+      });
+      document.documentElement.dataset.qaRecovery = JSON.stringify(window.devPlanet.testPlayerRecovery());
+      document.documentElement.dataset.qaReady = homes.every((item) => item.ok)
+        && window.devPlanet.layoutAudit().status === 'ready'
+        && window.devPlanet.townWalkability().pass
+        && coverage.waterPercent >= 34
+        && coverage.waterPercent <= 44
+        && waterAccess.pass
+        && boatLifecycle.pass
+        && marineEnvironment.pass
+        && homeStreetAccess.pass
+        && district.pass
+        && roadClearance.pass
+        && sharedHarbor.pass
+        && network.connected
+        && journey.pass
+        ? 'pass'
+        : 'fail';
+    });
+  }
+  if (URL_PARAMS.get('verifyPlayerRecovery') === '1') {
+    queueMicrotask(() => {
+      const trap = getSurfaceColliders().find((collider) => collider.label === 'operations-core');
+      if (!trap) return;
+      playerDir.copy(trap.dir);
+      playerBlockedFor = 0;
+      const recoveriesBefore = playerRecoveryCount;
+      setTimeout(() => {
+        document.documentElement.dataset.qaAutoRecovery = JSON.stringify({
+          clear: hasSurfaceClearance(playerDir, PLAYER_CLEARANCE_RADIUS),
+          exits: playerEscapeOptionCount(playerDir),
+          recovered: playerRecoveryCount > recoveriesBefore,
+        });
+      }, 900);
     });
   }
   const forcedActivityState = {

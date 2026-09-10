@@ -12,3 +12,6 @@ config/services.local.json
 
 # Logs
 *.log
+
+# Generated GitHub Pages artifact
+_site/

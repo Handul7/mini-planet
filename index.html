@@ -17,9 +17,14 @@
 <meta id="ogTitle" property="og:title" content="Handul Mini Planet" />
 <meta id="ogDescription" property="og:description" content="여섯 AI 에이전트의 작업 상태와 결과물을 보여주는 인터랙티브 3D 항구 행성 대시보드." />
 <meta id="ogUrl" property="og:url" content="https://handul7.github.io/mini-planet/" />
-<meta name="twitter:card" content="summary" />
+<meta id="ogImage" property="og:image" content="https://handul7.github.io/mini-planet/assets/social/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Handul Mini Planet — 여섯 AI 에이전트의 3D 항구 행성" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta id="twitterTitle" name="twitter:title" content="Handul Mini Planet" />
 <meta id="twitterDescription" name="twitter:description" content="여섯 AI 에이전트의 작업 상태와 결과물을 보여주는 인터랙티브 3D 항구 행성 대시보드." />
+<meta id="twitterImage" name="twitter:image" content="https://handul7.github.io/mini-planet/assets/social/og-image.png" />
 
 <!-- Content Security Policy (delivered via meta since static hosts can't set headers).
      Runtime code and visual assets are local; only the optional Open-Meteo
@@ -40,13 +45,14 @@
 
 <title>Handul Mini Planet — AI Agent Dashboard</title>
 <link id="canonicalUrl" rel="canonical" href="https://handul7.github.io/mini-planet/" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='35%25' cy='30%25' r='70%25'%3E%3Cstop offset='0%25' stop-color='%23b6e6bd'/%3E%3Cstop offset='70%25' stop-color='%2381bfbc'/%3E%3Cstop offset='100%25' stop-color='%235fa3a0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='25' fill='url(%23g)'/%3E%3Cpath d='M18 37c7 4 17 5 28-2' fill='none' stroke='%2336514f' stroke-width='4' stroke-linecap='round' opacity='.45'/%3E%3C/svg%3E" />
+<link rel="icon" href="favicon.ico" sizes="any" />
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" sizes="180x180" />
 <link rel="manifest" href="manifest.json" />
-<link id="appStyles" rel="stylesheet" href="src/style.css?v=76" />
+<link id="appStyles" rel="stylesheet" href="src/style.css?v=106" />
 </head>
 <body class="intro-active">
 <div id="app"></div>
-<div class="world-labels" id="worldLabels" aria-hidden="true"></div>
+<div class="world-labels" id="worldLabels"></div>
 <noscript>
   <div class="fallback card">이 행성은 WebGL과 JavaScript가 필요합니다. 브라우저 설정에서 JavaScript를 켜고 다시 열어주세요.</div>
 </noscript>
@@ -65,6 +71,7 @@
     <details class="intro-tools">
       <summary>행성 관리</summary>
       <button class="edit-enter" id="editModeBtn">✏️ 편집 모드</button>
+      <p class="edit-storage-note">이 편집은 현재 브라우저에만 저장되며 공개 홈페이지 원본은 변경하지 않습니다.</p>
     </details>
     <div class="loading" id="introLoading" aria-live="polite"></div>
     <button class="boot-retry" id="bootRetryBtn" type="button" hidden>다시 불러오기</button>
@@ -91,10 +98,11 @@
     <span class="wx-icon" id="wxIcon">⏳</span>
     <span class="wx-temp" id="wxTemp">--°</span>
     <span class="wx-time" id="wxTime">--:--</span>
-    <button class="sound-toggle" id="soundToggle" type="button" aria-label="환경음 켜기" aria-pressed="false" title="환경음 켜기">♬</button>
+    <button class="sound-toggle" id="soundToggle" type="button" aria-label="소리 켜기" aria-pressed="false" title="소리 켜기">♬</button>
   </div>
 
   <!-- Reference-inspired paper controls: quiet by default, useful on demand. -->
+  <button class="board-launch" id="villageBoardBtn" type="button" aria-label="마을 게시판 열기" title="마을 게시판">▤</button>
   <div class="visitor-rail" aria-label="방문자 메뉴">
     <button id="guideToggle" aria-label="방문 안내 열기" aria-expanded="false">☷</button>
     <button id="appearanceToggle" aria-label="캐릭터 꾸미기 열기" aria-expanded="false">♟</button>
@@ -140,6 +148,9 @@
     <button id="mobileInteractBtn" type="button" aria-label="가까운 집 입장" title="가까운 집 입장" disabled>
       <span aria-hidden="true">⌂</span>
     </button>
+    <button id="mobileRecoverBtn" type="button" aria-label="가까운 안전 지점으로 이동" title="가까운 안전 지점으로 이동">
+      <span aria-hidden="true">↶</span>
+    </button>
     <button id="mobileJumpBtn" type="button" aria-label="점프" title="점프">
       <span aria-hidden="true">↑</span>
     </button>
@@ -152,7 +163,7 @@
       <div class="editor-heading">
         <div class="editor-title">✏️ 행성 편집</div>
         <div class="editor-state-line">
-          <div class="editor-save-state" id="editorSaveState" role="status" aria-live="polite">저장 준비</div>
+          <div class="editor-save-state" id="editorSaveState" role="status" aria-live="polite">이 브라우저에 저장 준비</div>
           <div class="editor-quality loading" id="editorQuality" title="배치 릴리스 점검">배치 점검 중</div>
         </div>
       </div>
@@ -165,6 +176,7 @@
     </div>
 
     <div class="editor-body" id="editorBody">
+      <p class="editor-local-notice">이 편집은 현재 브라우저에만 저장되며 공개 홈페이지 원본은 변경하지 않습니다.</p>
       <div class="editor-tabs" role="tablist" aria-label="편집 도구 종류">
         <button class="active" id="editorObjectsTab" role="tab" aria-selected="true" aria-controls="editorObjectsPanel">오브젝트</button>
         <button id="editorTerrainTab" role="tab" aria-selected="false" aria-controls="editorTerrainPanel" tabindex="-1">길 · 지형</button>
@@ -181,6 +193,7 @@
           <p>도구를 고른 뒤 지면을 클릭해 점을 연결하세요.</p>
           <div class="editor-tool-grid">
             <button class="pal-btn draw-btn" id="drawRoadBtn">🛣️ 도로</button>
+            <button class="pal-btn draw-btn" id="drawLaneBtn">🧱 마을 골목</button>
             <button class="pal-btn draw-btn" id="drawTrailBtn">🛤️ 흙길</button>
             <button class="pal-btn draw-btn" id="drawSnowBtn">❄️ 눈길</button>
             <button class="pal-btn draw-btn" id="drawRiverBtn">🌊 물길</button>
@@ -189,6 +202,23 @@
             <button class="pal-btn draw-btn" id="drawGrassBtn">🌿 풀밭</button>
           </div>
         </div>
+        <details class="editor-structure">
+          <summary>고급 세계 구조</summary>
+          <div class="editor-tool-grid">
+            <button class="pal-btn draw-btn" id="drawIslandBtn" title="새 육지 영역 그리기">🏝️ 섬</button>
+            <button class="pal-btn draw-btn" id="drawSeaBtn" title="새 바다 영역 그리기">🌐 바다</button>
+            <button class="pal-btn draw-btn" id="drawDeckBtn" title="걸을 수 있는 나무 데크 그리기">▦ 데크</button>
+            <button class="pal-btn draw-btn" id="drawMarketBtn" title="어시장 보행 골목 그리기">⚑ 어시장</button>
+            <button class="pal-btn draw-btn" id="drawBreakwaterBtn" title="걸을 수 있는 방파제 그리기">▰ 방파제</button>
+            <button class="pal-btn draw-btn" id="drawWaveBtn" title="해안 파도 장식 그리기">≋ 파도</button>
+            <button class="pal-btn draw-btn" id="drawCamelliaBtn" title="동백 오솔길 그리기">✿ 동백길</button>
+            <button class="pal-btn draw-btn" id="drawStreetEdgeBtn" title="도로 양옆 연석 그리기">▱ 도로 연석</button>
+            <button class="pal-btn draw-btn" id="drawLaneEdgeBtn" title="골목 양옆 연석 그리기">▱ 골목 연석</button>
+            <button class="pal-btn draw-btn" id="drawHedgeBtn" title="공간 경계를 만드는 생울타리 그리기">♧ 생울타리</button>
+            <button class="pal-btn draw-btn" id="drawQuayRailBtn" title="부두 안전 난간 그리기">⌇ 부두 난간</button>
+            <button class="pal-btn draw-btn" id="drawCourtyardBtn" title="건물과 길을 잇는 포장 앞마당 그리기">▦ 건물 앞마당</button>
+          </div>
+        </details>
         <div class="editor-tool-section editor-view-section">
           <div class="editor-tool-title">빠른 시점</div>
           <div class="editor-tool-grid two-columns">
@@ -201,7 +231,7 @@
       <details class="editor-manage">
         <summary>배치 관리</summary>
         <div class="layout-audit" id="layoutAudit" data-state="loading">
-          <div><span>RELEASE LAYOUT</span><strong id="layoutAuditScore">--</strong></div>
+          <div><span>LAYOUT SAFETY</span><strong id="layoutAuditScore">--</strong></div>
           <p id="layoutAuditSummary">필수 오브젝트와 이동 충돌을 확인하는 중입니다.</p>
         </div>
         <div class="editor-manage-actions">
@@ -422,6 +452,6 @@
   <button id="appNoticeAction" type="button" hidden></button>
 </div>
 
-<script type="module" src="src/boot.js?v=76"></script>
+<script type="module" src="src/boot.js?v=106"></script>
 </body>
 </html>

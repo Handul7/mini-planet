@@ -2,12 +2,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const read = (file) => readFileSync(resolve(root, file), 'utf8');
-const write = (file, value) => writeFileSync(resolve(root, file), value);
-const config = JSON.parse(read('config/site.json'));
+const scriptFile = fileURLToPath(import.meta.url);
+const defaultRoot = resolve(dirname(scriptFile), '..');
 
-function publicUrl(value) {
+export function normalizePublicUrl(value) {
   const url = new URL(String(value || ''));
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
     throw new Error('config/site.json publicUrl은 인증·쿼리·해시가 없는 공개 HTTPS URL이어야 합니다.');
@@ -30,28 +28,42 @@ function replaceTagValue(source, id, attribute, value) {
   return source.replace(pattern, `$1${escapeAttribute(value)}$2`);
 }
 
-const url = publicUrl(config.publicUrl);
-const title = String(config.title || 'Handul Mini Planet').trim();
-const description = String(config.metaDescription || config.description || '').trim();
-let index = read('index.html');
-index = index.replace(/<title>[^<]*<\/title>/, `<title>${escapeAttribute(title)} — AI Agent Dashboard</title>`);
-index = replaceTagValue(index, 'siteDescription', 'content', description);
-index = replaceTagValue(index, 'ogSiteName', 'content', title);
-index = replaceTagValue(index, 'ogTitle', 'content', title);
-index = replaceTagValue(index, 'ogDescription', 'content', description);
-index = replaceTagValue(index, 'ogUrl', 'content', url);
-index = replaceTagValue(index, 'twitterTitle', 'content', title);
-index = replaceTagValue(index, 'twitterDescription', 'content', description);
-index = replaceTagValue(index, 'canonicalUrl', 'href', url);
-write('index.html', index);
+export function syncSiteMetadata({ root = defaultRoot, logger = console } = {}) {
+  const read = (file) => readFileSync(resolve(root, file), 'utf8');
+  const write = (file, value) => writeFileSync(resolve(root, file), value);
+  const config = JSON.parse(read('config/site.json'));
+  const url = normalizePublicUrl(config.publicUrl);
+  const socialImageUrl = new URL('assets/social/og-image.png', url).href;
+  const title = String(config.title || 'Handul Mini Planet').trim();
+  const description = String(config.metaDescription || config.description || '').trim();
 
-const manifest = JSON.parse(read('manifest.json'));
-manifest.name = title;
-manifest.description = description;
-write('manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+  let index = read('index.html');
+  index = index.replace(/<title>[^<]*<\/title>/, `<title>${escapeAttribute(title)} — AI Agent Dashboard</title>`);
+  index = replaceTagValue(index, 'siteDescription', 'content', description);
+  index = replaceTagValue(index, 'ogSiteName', 'content', title);
+  index = replaceTagValue(index, 'ogTitle', 'content', title);
+  index = replaceTagValue(index, 'ogDescription', 'content', description);
+  index = replaceTagValue(index, 'ogUrl', 'content', url);
+  index = replaceTagValue(index, 'ogImage', 'content', socialImageUrl);
+  index = replaceTagValue(index, 'twitterTitle', 'content', title);
+  index = replaceTagValue(index, 'twitterDescription', 'content', description);
+  index = replaceTagValue(index, 'twitterImage', 'content', socialImageUrl);
+  index = replaceTagValue(index, 'canonicalUrl', 'href', url);
+  write('index.html', index);
 
-const sitemapUrl = new URL('sitemap.xml', url).href;
-write('robots.txt', `User-agent: *\nAllow: /\n\nSitemap: ${sitemapUrl}\n`);
-write('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>${escapeAttribute(url)}</loc>\n  </url>\n</urlset>\n`);
+  const manifest = JSON.parse(read('manifest.json'));
+  manifest.name = title;
+  manifest.description = description;
+  write('manifest.json', JSON.stringify(manifest, null, 2) + '\n');
 
-console.log(`사이트 메타데이터 동기화: ${url}`);
+  const sitemapUrl = new URL('sitemap.xml', url).href;
+  write('robots.txt', `User-agent: *\nAllow: /\n\nSitemap: ${sitemapUrl}\n`);
+  write('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>${escapeAttribute(url)}</loc>\n  </url>\n</urlset>\n`);
+
+  logger.log(`사이트 메타데이터 동기화: ${url}`);
+  return { url, socialImageUrl };
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === scriptFile) {
+  syncSiteMetadata();
+}

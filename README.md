@@ -5,9 +5,11 @@ Six resonators from 《별의 공명자들》 stroll a cel-shaded miniature worl
 click any of them and the camera glides over while their status card opens — and every
 cottage is the **front door of one of Handul's services**.
 
-Built with **Three.js / WebGL** — walk-on-a-sphere movement, toon shading with inked outlines,
-and a pastel harbor palette. The public landing rhythm and on-demand paper UI were informed by
-[messenger.abeto.co](https://messenger.abeto.co); all world assets, UI, and code are original.
+Built with **Three.js / WebGL** — walk-on-a-sphere movement, matte cardstock shading,
+layered paper foliage, folded hulls, and a pastel harbor palette. Original paper templates and
+customization notes live in [`assets/papercut`](assets/papercut/README.md).
+The public landing rhythm and on-demand paper UI were informed by
+[messenger.abeto.co](https://messenger.abeto.co). Bundled third-party models retain their asset licenses.
 
 ## ✦ The team (별의 공명자들)
 
@@ -47,7 +49,16 @@ and up to six sanitized recent results without adding another central building.
   identity, public SOUL summary, channel, autonomy boundary, core responsibilities, compact
   voice/value/home notes, and current task. Hermes runtime health, model alias, risk, approval, and blocker appear
   only when the safe bridge supplies them. The agent stops and turns to face you while you read.
+- **Human-scale connected harbor** — a short cross street, harbor axis, and two work lanes connect
+  five street-facing homes to the civic core and working waterfront. House approaches now run
+  from each actual front door to the nearest street, while the pavilion, repair yard, ferry gate,
+  result board, clock kiosk, and shared garden sit inside the places whose activity they explain.
+  Curbs, hedges, quay rails, and paved frontages form continuous district boundaries instead of
+  scattering more standalone decoration. Three architecture profiles give the five front homes
+  different rooflines and working facades while preserving their owner/service contracts.
 - **Observation camera** — agent focus keeps the agent and their home in one unobstructed frame.
+  Opposite-side transitions follow an arc outside the globe, and the exploration camera sits lower
+  and closer so the street reads before the whole miniature planet does.
   An optional nine-second auto patrol visits all six agents; any direct camera or navigation input
   stops it immediately.
 - **Read-only team flow** — the team bar opens a compact Team Overview with published metrics,
@@ -67,7 +78,9 @@ and up to six sanitized recent results without adding another central building.
   Drag/rotate/scale/delete 20+ prop types (hand-built primitives plus bundled
   CC0 KayKit models — wells, windmills, watermills, lanterns, benches…; see
   [`assets/models/ATTRIBUTION.md`](assets/models/ATTRIBUTION.md)), draw
-  spline-smoothed roads/rivers and free-form ponds/sand/grass, all auto-saved
+  spline-smoothed roads/rivers and free-form ponds/sand/grass. Desktop editors can also open
+  **고급 세계 구조** to draw islands, sea, decks, market paths, breakwaters, wave bands,
+  and camellia trails; these structural edits create a safety backup before drawing. Everything is auto-saved
   to `localStorage` with visible save feedback, undo/redo, restorable safety backups before reset/import,
   and versioned JSON export/import. Agent homes (flags, nameplates,
   service doors) follow the houses around.
@@ -93,7 +106,8 @@ and up to six sanitized recent results without adding another central building.
   (computed locally, no API), the sun and moon swap cleanly at dawn/dusk, and
   **Polaris** shines above the north pole where a Little Prince rose grows as
   the planet's fixed reference point.
-- **Installable PWA** — network-first app updates plus a complete local app shell.
+- **Installable PWA** — real 192/512px and maskable app icons, Apple touch icon,
+  network-first app updates, and a complete local app shell.
   The pinned Three.js runtime ships in-repository, so the 3D world does not depend
   on a third-party CDN at launch.
 
@@ -104,6 +118,7 @@ and up to six sanitized recent results without adding another central building.
 | Move | `W A S D` / Arrows (automatically enters Explore mode) | Virtual joystick | Left stick / D-pad |
 | Jump | `Space` | `↑` action button | A |
 | Enter a house (service) | `F` at the door, or click the house | `⌂` near a door / tap the house | X |
+| Board / leave a boat | `F` beside the harbor boat / near shore | `⛵` action button | X |
 | Look / Zoom | Drag / Wheel | Drag / Pinch | Right stick |
 | Agent card | Click an agent, team bar, or press `1`–`6` | Tap | — |
 | Ambient sound | `♬` in the weather chip (muted by default) | Tap `♬` | — |
@@ -117,9 +132,20 @@ category open at a time, and can be collapsed while arranging the scene. Use its
 add props (including 🌉 다리 — bridges carry their own walkable water
 crossing), 도로/흙길/눈길/물길 buttons to draw spline-smoothed paths and
 연못/모래밭/풀밭 to fill free-form shapes (click points, double-click or ✓ to
-finish — ponds are swimmable water), 시점 presets (🏘️ 마을 / 🌹 북극),
+finish — water blocks walking; sea travel requires boarding a harbor boat). On desktop, **고급 세계 구조** exposes
+섬/바다/데크/어시장/방파제/파도/동백길 tools behind a separate disclosure and
+backs up the current layout before structural drawing. Use 시점 presets (🏘️ 마을 / 🌹 북극),
 ⬇️/⬆️ for JSON export/import. Tip: open with `?dev=1` to skip the service
 worker while developing (and get a small `devPlanet` console helper).
+Edits are saved only in the current browser's local storage; they never change the
+published homepage source.
+
+The default harbor keeps open water at roughly 40% of the sphere and treats it as
+a working district: the boardable fishing boat, channel beacon, buoy, and cargo
+ferry all sit on registered water. A single roadside vending point and the public
+work buildings carry the medium-scale environmental rhythm onto land without adding
+solid navigation blockers. Repeated foliage sheets and static visual fragments are
+batched inside their existing edit/animation roots to reduce render calls.
 
 For deterministic atmosphere QA, development mode also accepts
 `&weatherPreset=clear|cloudy|rain|storm`; `devPlanet.weatherState()`,
@@ -214,6 +240,9 @@ The home-based exhibition direction is recorded in
 │   ├── status-source.js    # polling/SSE transport boundary for Hermes status
 │   ├── public-dashboard.js # allowlist task/approval/status projection + freshness policy
 │   ├── release-quality.js  # fleet summary and deterministic layout release audit
+│   ├── paper-style.js      # shared matte paper surface + batched solid foliage
+│   ├── world/
+│   │   └── harbor-kit.js   # architecture profiles, curbs, hedges, and quay rails
 │   └── style.css           # UI styling (HUD, cards, team bar, service panel, editor, intro)
 ├── config/
 │   ├── agents.json         # the roster — edit me!
@@ -225,13 +254,18 @@ The home-based exhibition direction is recorded in
 │   ├── hermes-integration.md # Mac-mini bridge boundary and deployment plan
 │   ├── dashboard-contract.md # public entities, task/approval schema, privacy allowlist
 │   └── home-result-spaces.md # implemented per-agent result rooms and artifact boundary
-├── agent-status.json       # live agent states — Hermes writes me!
+├── agent-status.json       # curated static-demo status snapshot
 ├── agent-results.json      # curated public fallback for home result spaces
 ├── assets/fonts/           # pinned Nunito WOFF2 weights + OFL license
+├── assets/icons/           # favicon/PWA/Apple install icons
+├── assets/social/          # 1200×630 Open Graph share image
+├── assets/papercut/        # original solid-paper contour templates and customization notes
 ├── manifest.json           # PWA manifest
 ├── sw.js                   # network-first app updates + repeat/offline asset cache
 ├── scripts/
-│   └── validate-predeploy.mjs # zero-dependency schema/cache/syntax/privacy/GLTF checks
+│   ├── build-site.mjs      # allowlisted runtime files → _site
+│   ├── validate-site-artifact.mjs # relative-path and artifact-boundary checks
+│   └── validate-predeploy.mjs # schema/cache/syntax/privacy/GLTF checks
 ├── tests/
 │   └── *.test.mjs          # public contract, transport, and release-quality tests
 ├── vendor/three/           # pinned Three.js core + only the add-ons we import
@@ -241,8 +275,9 @@ The home-based exhibition direction is recorded in
 └── README.md
 ```
 
-No build step, no bundler — `src/boot.js` loads the app as native ES modules, and every
-Three.js import resolves directly to the pinned local runtime.
+No bundler is required — `src/boot.js` loads the app as native ES modules, and every
+Three.js import resolves directly to the pinned local runtime. Deployment has one deterministic
+assembly step that copies only the public runtime allowlist into `_site`.
 
 ## 🚀 Run locally
 
@@ -265,9 +300,9 @@ frame-time average, shadow cadence, rain budget, and draw statistics.
 
 ## 🌐 Deploy
 
-The whole folder is a static site — copy it anywhere. The included GitHub Actions
-workflow publishes to GitHub Pages on every push to `main` (Settings → Pages → Source:
-**GitHub Actions**). Any static host (Netlify, Vercel, Cloudflare Pages) works too.
+The included GitHub Actions workflow builds a minimal `_site` artifact and publishes it to
+GitHub Pages on every push to `main` (Settings → Pages → Source: **GitHub Actions**).
+Any static host (Netlify, Vercel, Cloudflare Pages) can serve the generated `_site` directory.
 HTTPS is required for service workers and the optional weather API.
 
 Before publishing, set the public links in `config/site.json`. When Mini Planet itself is
@@ -283,7 +318,7 @@ visitor panel does not link back to the page it is already showing:
 ```
 
 Run `node scripts/sync-site-metadata.mjs` after changing the domain. It updates the static
-canonical/Open Graph tags, PWA description, `robots.txt`, and `sitemap.xml`; the deployment
+canonical/Open Graph URL and image tags, PWA description, `robots.txt`, and `sitemap.xml`; the deployment
 workflow also runs it automatically before validation and upload. Configure the same hostname
 in the chosen static host and enable HTTPS. Desktop and mobile visitors use the same URL; the
 responsive UI and input mode adapt in the browser.
@@ -298,6 +333,8 @@ Run the same zero-dependency gate used by GitHub Actions before committing a rel
 ```bash
 node scripts/validate-predeploy.mjs
 node --test tests/*.test.mjs
+node scripts/build-site.mjs
+node scripts/validate-site-artifact.mjs _site
 ```
 
 The Pages workflow validates JSON schemas and six-agent key parity, checks every JavaScript

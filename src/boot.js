@@ -24,7 +24,7 @@ if (dev) {
   if (styles) styles.href = new URL(`./style.css?dev=${Date.now()}`, import.meta.url).href;
 }
 
-import(`./main.js?${dev ? `dev=${Date.now()}` : 'v=76'}`).catch((error) => {
+import(`./main.js?${dev ? `dev=${Date.now()}` : 'v=106'}`).catch((error) => {
   console.error('Mini Planet boot failed', error);
   showMiniPlanetBootError();
 });
