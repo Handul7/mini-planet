@@ -48,7 +48,7 @@
 <link rel="icon" href="favicon.ico" sizes="any" />
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" sizes="180x180" />
 <link rel="manifest" href="manifest.json" />
-<link id="appStyles" rel="stylesheet" href="src/style.css?v=106" />
+<link id="appStyles" rel="stylesheet" href="src/style.css?v=112" />
 </head>
 <body class="intro-active">
 <div id="app"></div>
@@ -98,6 +98,13 @@
     <span class="wx-icon" id="wxIcon">⏳</span>
     <span class="wx-temp" id="wxTemp">--°</span>
     <span class="wx-time" id="wxTime">--:--</span>
+    <div class="landmark-compass" id="planetCompass" role="img" aria-label="북쪽 장미와 등대 방향 나침반" title="N: 북극의 장미 · S: 정남쪽 · 파란 표식: 실제 등대 방향">
+      <div class="compass-dial" aria-hidden="true">
+        <div class="compass-pointer compass-north" data-compass="north" hidden><span>N</span><i>S</i></div>
+        <div class="compass-pointer compass-lighthouse" data-compass="lighthouse" hidden><span>◆</span></div>
+        <b class="compass-center"></b>
+      </div>
+    </div>
     <button class="sound-toggle" id="soundToggle" type="button" aria-label="소리 켜기" aria-pressed="false" title="소리 켜기">♬</button>
   </div>
 
@@ -452,6 +459,6 @@
   <button id="appNoticeAction" type="button" hidden></button>
 </div>
 
-<script type="module" src="src/boot.js?v=106"></script>
+<script type="module" src="src/boot.js?v=112"></script>
 </body>
 </html>

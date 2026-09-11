@@ -67,7 +67,7 @@ export function makePaperSlab(materialFactory, { width, length, color, layers = 
   return mesh;
 }
 
-export function makePaperWindowTrim(materialFactory, { accent }) {
+export function makePaperWindowTrim(materialFactory, { accent, gable = true }) {
   const pieces = [];
   const ink = new THREE.Color(accent).lerp(new THREE.Color(0x52646b), 0.35);
   const windows = [
@@ -101,7 +101,8 @@ export function makePaperWindowTrim(materialFactory, { accent }) {
     holes: [[[0, 0.125], [0.125, 0], [0, -0.125], [-0.125, 0]]],
   });
   vent.translate(0, 2.87, 1.75);
-  pieces.push(vent);
+  if (gable) pieces.push(vent);
+  else vent.dispose();
   const mesh = paperMesh(pieces, materialFactory);
   mesh.userData.windowCount = windows.length;
   return mesh;
@@ -132,17 +133,17 @@ export function makePaperDoor(materialFactory, { width, height, color }) {
   return paperMesh(pieces, materialFactory);
 }
 
-export function makePaperHouseShell(materialFactory, { wall, accent }) {
+export function makePaperHouseShell(materialFactory, { wall, accent, gable = true }) {
   const pieces = [];
   for (let layer = 0; layer < 3; layer++) {
     const width = 1.83 - layer * 0.09;
     const top = 2.62 - layer * 0.06;
-    const peak = 3.53 - layer * 0.06;
+    const peak = gable ? 3.53 - layer * 0.06 : top;
     const bottom = 0.25 + layer * 0.025;
     const color = layer === 0 ? CUT_EDGE : layer === 1
       ? new THREE.Color(wall).lerp(new THREE.Color(accent), 0.38).multiplyScalar(0.67) : wall;
     const windowSize = 0.68 + layer * 0.035;
-    const facade = [[-width, bottom], [-0.47, bottom], [-0.47, 1.85], [0.47, 1.85],
+    const facade = [[-width, bottom], [-0.47, bottom], [-0.47, 2.22], [0.47, 2.22],
       [0.47, bottom], [width, bottom], [width, top], [0, peak], [-width, top]];
     const front = cutPanel(facade, { color, holes: [-1.12, 1.12].map((x) => rectangle(windowSize, windowSize, x, 1.45)) });
     front.translate(0, 0, 1.54 + layer * 0.08);

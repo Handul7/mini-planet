@@ -19,7 +19,7 @@ const directions = [
 const splineDirs = (points) => ({ dirs: points.map((point) => point.clone()) });
 const terrainRadius = () => 7.47;
 
-test('agent cottages use three architecture silhouettes without changing ownership', () => {
+test('all five cottages have distinct architecture silhouettes', () => {
   const common = {
     wallMaterial: material(), roofMaterial: material(), edgeMaterial: material(), glassMaterial: material(),
   };
@@ -27,12 +27,22 @@ test('agent cottages use three architecture silhouettes without changing ownersh
     makeCottageArchitecture({ ...common, ownerKey: 'rodi' }),
     makeCottageArchitecture({ ...common, ownerKey: 'jarvis' }),
     makeCottageArchitecture({ ...common, ownerKey: 'anne' }),
+    makeCottageArchitecture({ ...common, ownerKey: 'yul' }),
+    makeCottageArchitecture({ ...common, ownerKey: 'ludwig' }),
   ];
   assert.deepEqual(
     profiles.map((group) => group.userData.architectureProfile),
-    ['signal-house', 'harbor-workshop', 'garden-studio'],
+    ['signal-house', 'memory-control-house', 'green-gables-atelier', 'resonance-sawtooth-workshop', 'moon-vault-library'],
   );
-  assert.ok(profiles.every((group) => group.children.length >= 3));
+  const bounds = profiles.map((group) => {
+    group.traverse((mesh) => {
+      if (!mesh.isMesh) return;
+      assert.ok(mesh.geometry.attributes.position.count > 0);
+      assert.ok(Array.from(mesh.geometry.attributes.position.array).every(Number.isFinite));
+    });
+    return new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3()).toArray();
+  });
+  assert.equal(new Set(bounds.map((b) => b.map((n) => n.toFixed(2)).join(','))).size, 5);
 });
 
 test('curb openings split geometry instead of drawing across an entrance', () => {

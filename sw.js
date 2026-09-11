@@ -1,22 +1,25 @@
 // Service worker — caches the complete local app shell for offline / fast repeat loads.
 // Same-origin code is network-first so releases do not stick.
 const CACHE_PREFIX = 'handul-planet-';
-const CACHE = CACHE_PREFIX + 'v106';
+const CACHE = CACHE_PREFIX + 'v112';
 const SHELL = [
   './',
   './index.html',
-  './src/boot.js?v=106',
-  './src/main.js?v=106',
+  './src/boot.js?v=112',
+  './src/main.js?v=112',
+  './src/world/village-paving.js?v=112',
+  './src/world/island-places.js?v=110',
+  './src/landmark-compass.js?v=108',
   './src/rose-story.js?v=105',
   './src/render-efficiency.js?v=104',
-  './src/world/spatial-structure.js?v=103',
+  './src/world/spatial-structure.js?v=112',
   './src/village-board.js?v=102',
   './src/render-stability.js?v=102',
   './config/village-board.json',
   './src/world/public-spaces.js?v=105',
   './src/paper-style.js?v=97',
-  './src/world/harbor-kit.js?v=105',
-  './src/world/paper-assets.js?v=105',
+  './src/world/harbor-kit.js?v=110',
+  './src/world/paper-assets.js?v=112',
   './assets/papercut/contours.js?v=97',
   './src/status-source.js?v=70',
   './src/public-dashboard.js?v=70',
@@ -28,7 +31,7 @@ const SHELL = [
   './src/agent-results.js?v=60',
   './src/agent-signatures.js?v=72',
   './src/input-controls.js?v=71',
-  './src/style.css?v=106',
+  './src/style.css?v=112',
   './favicon.ico',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',

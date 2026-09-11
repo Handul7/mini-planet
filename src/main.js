@@ -7,19 +7,22 @@ import { OutputPass } from '../vendor/three/examples/jsm/postprocessing/OutputPa
 import { GLTFLoader } from '../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from '../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
 import { applyPaperSurface, applyPaperObject, makePaperCanopy, paperCutGeometry } from './paper-style.js?v=97';
-import { makePaperSlab, makePaperHouseShell, makePaperRelief, makePaperTierRoof, makePaperTower, makePaperWindowTrim, makePaperDoor, makePaperRose } from './world/paper-assets.js?v=105';
+import { makePaperSlab, makePaperHouseShell, makePaperRelief, makePaperTierRoof, makePaperTower, makePaperWindowTrim, makePaperDoor, makePaperRose } from './world/paper-assets.js?v=112';
+import { makeStreetPavers, makePlazaPavers } from './world/village-paving.js?v=112';
+import { makeIslandMooring, makePaperGrove, makeWindLookout } from './world/island-places.js?v=110';
 import { makePaperPublicSpace } from './world/public-spaces.js?v=105';
 import { createRoseStory } from './rose-story.js?v=105';
+import { createLandmarkCompass } from './landmark-compass.js?v=108';
 import { createVillageBoard } from './village-board.js?v=102';
 import { createStableSceneTarget, stabilizePaperShadows } from './render-stability.js?v=102';
 import { createVisibilityLoop, createElementSizeCache } from './render-efficiency.js?v=104';
-import { oceanBandBounds, streetNetworkState, findSurfaceRoute } from './world/spatial-structure.js?v=103';
+import { oceanBandBounds, streetNetworkState, findSurfaceRoute, findStreetRoute, walkSurfaceRoute, segmentOccludedBySphere } from './world/spatial-structure.js?v=112';
 import {
   makeCottageArchitecture,
   makeHedgeLine,
   makeQuayRail,
   makeStreetEdges,
-} from './world/harbor-kit.js?v=105';
+} from './world/harbor-kit.js?v=110';
 import { createAgentStatusSource } from './status-source.js?v=70';
 import { createSkySystem } from './sky.js?v=97';
 import { createAmbientAudio } from './ambient-audio.js?v=104';
@@ -200,7 +203,7 @@ const THEME = {
     coastSand: 0xeee2bd, breakwater: 0xa8bcc2,
     islandGrass: 0xa8cb92, harborDeck: 0xad8881,
     marketPath: 0xc2b291, camelliaPath: 0x8fa584,
-    roadAsphalt: 0xc7cdbd, roadLine: 0xebeee4,
+    roadAsphalt: 0x9aa8a4, roadLine: 0xebeee4,
     dirt:     0x987d60,
     snowTop:  0xf4f9fd, snowEdge: 0xcfe0ea,
     rosePetal: 0xd91f4e, roseCore: 0xa80f38,
@@ -1353,7 +1356,7 @@ function addAgentHomeSignature(root, ownerKey) {
     addOutline(star, 1.055);
     motion.pivot = star;
   } else if (spec.id === 'chronicle-dial') {
-    signature.position.set(0, 4.08, 0.30);
+    signature.position.set(0, 3.37, 0.30);
     const face = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.10, 16), pale);
     face.rotation.x = Math.PI / 2;
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.052, 6, 20), accent);
@@ -1375,7 +1378,7 @@ function addAgentHomeSignature(root, ownerKey) {
     addOutline(face, 1.025);
     motion.pivot = minutePivot;
   } else if (spec.id === 'resonance-fork') {
-    signature.position.set(-0.62, 3.58, -0.08);
+    signature.position.set(-0.62, 3.00, -0.08);
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.075, 1.02, 6), dark);
     mast.position.y = 0.51;
     const scan = new THREE.Group();
@@ -1501,8 +1504,8 @@ function addAgentHomeFacade(root, ownerKey, kind = 'cottage') {
   const dark = toonMat(0x4b5058);
   const marker = new THREE.Group();
   marker.name = ownerKey + '-home-facade';
-  marker.position.set(0, kind === 'lighthouse' ? 2.45 : 2.18, kind === 'lighthouse' ? 0.79 : 1.80);
-  marker.scale.setScalar(kind === 'lighthouse' ? 0.82 : 1);
+  marker.position.set(0, kind === 'lighthouse' ? 2.45 : 2.44, kind === 'lighthouse' ? 0.79 : 1.80);
+  marker.scale.setScalar(kind === 'lighthouse' ? 0.82 : 0.72);
   const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.52, 0.07), dark);
   plaque.castShadow = true;
   marker.add(plaque);
@@ -1596,35 +1599,43 @@ function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '
   foundation.castShadow = true;
   foundation.receiveShadow = true;
   addOutline(foundation, 1.016);
-  const base = makePaperHouseShell(toonMat, { wall, accent: roof });
+  const gable = !['jarvis', 'yul', 'ludwig'].includes(ownerKey);
+  const base = makePaperHouseShell(toonMat, { wall, accent: roof, gable });
   // Coplanar card layers use their baked color separation, avoiding shadow-map
   // acne on the facade while still casting the house silhouette onto the ground.
   base.receiveShadow = false;
   const roofMat = toonMat(roof);
-  const roofLeft = makePaperSlab(toonMat, { width: 2.24, length: 3.74, color: roof, depth: 0.06, gap: 0.045, folds: 3 });
-  const roofRight = roofLeft.clone();
-  roofLeft.position.set(-0.83, 3.02, 0); roofLeft.rotation.z = 0.47;
-  roofRight.position.set(0.83, 3.02, 0); roofRight.rotation.z = -0.47;
-  [roofLeft, roofRight].forEach(m => { m.castShadow = true; addOutline(m, 1.025); });
+  const roofParts = [];
+  if (gable) {
+    const roofLeft = makePaperSlab(toonMat, { width: 2.24, length: 3.74, color: roof, depth: 0.06, gap: 0.045, folds: 3 });
+    const roofRight = roofLeft.clone();
+    roofLeft.position.set(-0.83, 3.02, 0); roofLeft.rotation.z = 0.47;
+    roofRight.position.set(0.83, 3.02, 0); roofRight.rotation.z = -0.47;
+    [roofLeft, roofRight].forEach(m => { m.castShadow = true; addOutline(m, 1.025); });
+    roofParts.push(roofLeft, roofRight);
+  }
   const paperEdge = toonMat(0xf1eee2);
   const foundationSheet = makePaperSlab(toonMat, { width: 3.76, length: 3.38, color: 0xb9c8b7, depth: 0.035, gap: 0.012 });
   foundationSheet.position.y = 0.30;
   foundationSheet.castShadow = foundationSheet.receiveShadow = true;
   g.add(foundationSheet);
-  const ridge = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.70, 6), roofMat);
-  ridge.position.y = 3.53;
-  ridge.rotation.x = Math.PI / 2;
-  ridge.castShadow = true;
-  addOutline(ridge, 1.03);
-  const door = makePaperDoor(toonMat, { width: 0.82, height: 1.78, color: roof });
-  door.position.set(0, 0.9, 1.63);
+  if (gable) {
+    const ridge = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.70, 6), roofMat);
+    ridge.position.y = 3.53;
+    ridge.rotation.x = Math.PI / 2;
+    ridge.castShadow = true;
+    addOutline(ridge, 1.03);
+    roofParts.push(ridge);
+  }
+  const door = makePaperDoor(toonMat, { width: 0.82, height: 2.15, color: roof });
+  door.position.set(0, 1.085, 1.63);
   door.receiveShadow = false;
-  const windowTrim = makePaperWindowTrim(toonMat, { accent: roof });
+  const windowTrim = makePaperWindowTrim(toonMat, { accent: roof, gable });
   windowTrim.receiveShadow = false;
   g.add(windowTrim);
   const windowMat = new THREE.MeshToonMaterial({
-    color: 0xfff0b8,
-    emissive: 0xd89a43,
+    color: ownerKey === 'jarvis' ? 0xc0e7f3 : 0xfff0b8,
+    emissive: ownerKey === 'jarvis' ? 0x57889e : 0xd89a43,
     emissiveIntensity: 0.28,
     gradientMap: TOON_GRAD,
   });
@@ -1645,14 +1656,17 @@ function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '
   oppositeWindow.position.x *= -1;
   const rearWindow = new THREE.Mesh(new THREE.BoxGeometry(1.01, 0.79, 0.055), windowMat);
   rearWindow.position.set(0, 1.45, -1.525);
-  const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.92, 0.34), toonMat(0xa57f70));
-  chimney.position.set(1.08, 3.62, -0.25); chimney.castShadow = true; addOutline(chimney, 1.035);
+  if (gable) {
+    const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.92, 0.34), toonMat(0xa57f70));
+    chimney.position.set(1.08, 3.62, -0.25); chimney.castShadow = true; addOutline(chimney, 1.035);
+    roofParts.push(chimney);
+  }
   const stoop = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.12, 0.48), toonMat(0xb8a18b));
   stoop.position.set(0, 0.06, 1.82);
   g.add(
-    foundation, base, roofLeft, roofRight, ridge, door,
+    foundation, base, ...roofParts, door,
     leftWindow, rightWindow, sideWindow, oppositeWindow, rearWindow,
-    chimney, stoop,
+    stoop,
   );
   const architecture = makeCottageArchitecture({
     ownerKey,
@@ -1668,7 +1682,8 @@ function makeCottage({ wall = 0xf7f5f0, roof = 0xe8896b, scale = 1, ownerKey = '
   g.userData.architectureProfile = architecture.userData.architectureProfile;
   g.userData.paperConstruction = 'layered-cut-card';
   g.userData.scaleSpec = {
-    doorHeight: 1.78 * scale,
+    doorHeight: 2.15 * scale,
+    doorHeightLocal: 2.15,
     footprintWidth: 3.68 * scale,
     profile: architecture.userData.architectureProfile,
   };
@@ -2339,8 +2354,8 @@ function makeLighthouse(ownerKey = '') {
   lanternRoom.position.y = 5.18;
   const roof = makePaperTierRoof(toonMat, { radius: 0.72, height: 0.62, color: accent.color, tiers: 6, sides: 10 });
   roof.position.y = 5.54;
-  const door = makePaperDoor(toonMat, { width: 0.62, height: 1.18, color: accent.color });
-  door.position.set(0, 0.86, 0.87);
+  const door = makePaperDoor(toonMat, { width: 0.80, height: 1.70, color: accent.color });
+  door.position.set(0, 1.12, 0.87);
 
   const rail = new THREE.Group();
   const railRing = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.035, 6, 24), accent);
@@ -2370,12 +2385,14 @@ function makeLighthouse(ownerKey = '') {
   });
   rail.traverse((m) => { if (m.isMesh) m.castShadow = true; });
   g.add(rail, beamPivot);
-  g.userData.colliderRadius = 0.22;
+  // Keep the flat apron walkable; only the 1.22-unit tower base is solid.
+  g.userData.colliderRadius = 0.17;
   g.userData.windowMaterials = [lanternMat];
   g.userData.lighthouseBeam = beamPivot;
   g.userData.homeLabelOffset = new THREE.Vector3(0, 6.35, 0.5);
   g.userData.homeFlagOffset = new THREE.Vector3(1.25, 0, 1.15);
   g.userData.doorOffset = new THREE.Vector3(0, 0, 1.28);
+  g.userData.scaleSpec = { doorHeightLocal: 1.70, profile: 'island-lighthouse' };
   addAgentHomeFacade(g, ownerKey, 'lighthouse');
   addAgentHomeSignature(g, ownerKey);
   return g;
@@ -2393,8 +2410,13 @@ function makeOpsBeacon() {
   base.position.y = 0.07;
   const deck = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.58, 0.09, 12), pale);
   deck.position.y = 0.18;
-  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.72, 8), toonMat(0x71858a));
-  pedestal.position.y = 0.56;
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.40, 8), toonMat(0x71858a));
+  pedestal.position.y = 0.46;
+  const basin = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.085, 6, 16), pale);
+  basin.rotation.x = Math.PI / 2; basin.position.y = 0.30;
+  const water = new THREE.Mesh(new THREE.CircleGeometry(0.59, 24), toonMat(0x75b8c3));
+  water.rotation.x = -Math.PI / 2; water.position.y = 0.265;
+  g.add(basin, water);
   const coreMaterial = new THREE.MeshToonMaterial({
     color: 0x8bd8d2,
     emissive: 0x5fa3a0,
@@ -2402,7 +2424,7 @@ function makeOpsBeacon() {
     gradientMap: TOON_GRAD,
   });
   const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 1), coreMaterial);
-  core.position.y = 1.03;
+  core.position.y = 0.78;
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: 0xb8efea,
     transparent: true,
@@ -2410,12 +2432,12 @@ function makeOpsBeacon() {
     depthWrite: false,
   });
   const horizontalRing = new THREE.Mesh(new THREE.TorusGeometry(0.47, 0.025, 6, 30), ringMaterial);
-  horizontalRing.position.y = 0.82;
+  horizontalRing.position.y = 0.28;
   horizontalRing.rotation.x = Math.PI / 2;
   const orbitPivot = new THREE.Group();
-  orbitPivot.position.y = 1.03;
+  orbitPivot.position.y = 0.78;
   const verticalRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.35, 0.018, 6, 26),
+    new THREE.TorusGeometry(0.25, 0.015, 6, 20),
     ringMaterial.clone(),
   );
   verticalRing.rotation.y = Math.PI / 2;
@@ -2440,7 +2462,7 @@ function makeOpsBeacon() {
       new THREE.BoxGeometry(0.025, 0.025, 0.40),
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38 }),
     );
-    spoke.position.set(Math.cos(angle) * 0.24, 0.82, Math.sin(angle) * 0.24);
+    spoke.position.set(Math.cos(angle) * 0.24, 0.276, Math.sin(angle) * 0.24);
     spoke.rotation.y = -angle + Math.PI / 2;
     const material = new THREE.MeshToonMaterial({
       color,
@@ -2448,11 +2470,11 @@ function makeOpsBeacon() {
       emissiveIntensity: 0.45,
       gradientMap: TOON_GRAD,
     });
-    const node = new THREE.Mesh(new THREE.IcosahedronGeometry(0.075, 1), material);
-    node.position.set(Math.cos(angle) * 0.49, 0.82, Math.sin(angle) * 0.49);
+    const node = new THREE.Mesh(new THREE.IcosahedronGeometry(0.06, 1), material);
+    node.position.set(Math.cos(angle) * 0.65, 0.39, Math.sin(angle) * 0.65);
     node.castShadow = true;
     addOutline(node, 1.04);
-    nodes.push({ key: agent?.key || `agent-${i + 1}`, color, mesh: node, material, spoke: spoke.material });
+    nodes.push({ key: agent?.key || `agent-${i + 1}`, color, mesh: node, material, spoke: spoke.material, baseY: 0.39 });
     g.add(spoke, node);
   }
 
@@ -2670,6 +2692,12 @@ const PROP_DEFS = {
   },
   greenhouse: { make: () => makeGreenhouse(), lift: 0.055, collider: 0.12, label: 'greenhouse',
     category: '건물', paletteLabel: '🏡 비닐하우스', editableParams: ['scale', 'yaw'] },
+  islandMooring: { make: () => makeIslandMooring(toonMat), lift: 0.10, collider: 0, label: 'island-mooring',
+    category: '항구', paletteLabel: '섬 선착장 표식', editableParams: ['scale', 'yaw'] },
+  paperGrove: { make: () => makePaperGrove(toonMat), lift: 0.035, collider: 0.11, label: 'paper-grove',
+    category: '자연', paletteLabel: '종이 수목 군락', editableParams: ['scale', 'yaw'] },
+  windLookout: { make: () => makeWindLookout(toonMat), lift: 0.035, collider: 0.13, label: 'wind-lookout',
+    category: '공용', paletteLabel: '바람 정원 조형물', editableParams: ['scale', 'yaw'] },
   repairShed: { make: () => makeRepairShed(), lift: 0.055, collider: 0.14, label: 'repair-shed',
     category: '건물', paletteLabel: '▰ 항구 수리소', editableParams: ['scale', 'yaw'] },
   tree:   { make: () => makeTree(), lift: 0.035, collider: 0.12, baseScale: 0.85, label: 'tree',
@@ -2768,7 +2796,7 @@ const PROP_DEFS = {
     category: '항구', paletteLabel: '⌂ 여객 부두 게이트', editableParams: ['scale', 'yaw'] },
   tetrapod: { make: () => makeTetrapod(), lift: 0.075, collider: 0, label: 'tetrapod',
     category: '항구', paletteLabel: '🪨 테트라포드', editableParams: ['scale', 'yaw'] },
-  lighthouse: { make: (o) => makeLighthouse(o.ownerKey), lift: 0.055, collider: 0.22, label: 'lighthouse',
+  lighthouse: { make: (o) => makeLighthouse(o.ownerKey), lift: 0.055, collider: 0.17, label: 'lighthouse',
     category: '건물', paletteLabel: '🔦 등대', editableParams: ['scale', 'yaw'] },
   camellia: { make: () => makeCamelliaTree(), lift: 0.035, collider: 0.08, label: 'camellia',
     category: '자연', paletteLabel: '🌺 동백나무', editableParams: ['scale', 'yaw'] },
@@ -3077,7 +3105,10 @@ const PATH_DEFS = {
         // Fill the old traffic-ring silhouette without changing its safe route.
         for (const child of g.children.slice()) disposeObject(child);
         g.clear();
-        g.add(makeCapMesh(center, rim, { lift: 0.139, material: toonMat(0xc7cdbd) }));
+        g.add(makeCapMesh(center, rim, { lift: 0.139, material: toonMat(0xaab7b0) }));
+        g.add(makePlazaPavers(center, rim, { radius: R, terrainRadius, materialFactory: toonMat, tangentBasis }));
+      } else {
+        g.add(makeStreetPavers(points, { radius: R, terrainRadius, splineDirs, materialFactory: toonMat }));
       }
       const walkZones = registerPathZones(
         splineDirs(points, { step: 0.055 }).dirs, 0.09, 'road-walk', 0.055, registerBridgeZone
@@ -3427,7 +3458,7 @@ const PATH_DEFS = {
     label: '건물 앞마당',
     minPoints: 3,
     closed: true,
-    build(points) {
+    build(points, data = {}) {
       const { dirs: rim } = splineDirs(points, { step: 0.03, forceClosed: true });
       if (rim.length < 3) return { mesh: new THREE.Group(), zones: [] };
       const center = centroidDir(rim);
@@ -3437,6 +3468,9 @@ const PATH_DEFS = {
       }));
       mesh.add(makeCapMesh(center, rim, {
         lift: 0.098, material: toonMat(0xc8c3ae),
+      }));
+      if (data.id?.endsWith('.forecourt')) mesh.add(makePlazaPavers(center, rim, {
+        radius: R, terrainRadius, materialFactory: toonMat, tangentBasis, lift: 0.122, color: 0xc4c3b7, cell: 0.48,
       }));
       mesh.userData.districtRole = 'building-frontage';
       return { mesh, zones: [] };
@@ -3567,7 +3601,7 @@ function currentLayoutAudit() {
     expectedOwners: AGENT_CONFIG.map((agent) => agent.key),
     requiredTypes: [
       'opsBeacon', 'wayfinder', 'harborCrane',
-      'civicPavilion', 'clockKiosk', 'repairShed', 'ferryGate',
+      'civicPavilion', 'ferryGate',
     ],
     planetRadius: R,
     spawnN: DEFAULT_PLAYER_SPAWN_DIR.toArray(),
@@ -3948,6 +3982,9 @@ function loadSavedLayout() {
       try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(clean)); } catch (_) { /* optional migration */ }
     }
     clean = migrateSavedComposition(clean, raw);
+    clean = migrateSavedComposition(clean, JSON.stringify(clean), '107', migrateRoseClearing);
+    clean = migrateSavedComposition(clean, JSON.stringify(clean), '110', migratePlaceIdentity);
+    clean = migrateSavedComposition(clean, JSON.stringify(clean), '111', migrateVillageFrontage);
     return clean.filter((entry) => !isRetiredOceanTrail(entry));
   } catch (e) { /* corrupt -> fall back to default */ }
   return null;
@@ -4133,6 +4170,7 @@ function importLayoutFromFile(file) {
 // prop — it never moves.
 // ---------------------------------------------------------------------------
 const NORTH_POLE = new THREE.Vector3(0, 1, 0);
+const ROSE_LANDMARK_SCALE = 0.60;
 const poleRose = (() => {
   const g = new THREE.Group();
   g.name = 'B-612 Rose';
@@ -4177,9 +4215,11 @@ const poleRose = (() => {
   g.add(glow);
   g.userData.roseHead = head;
   g.userData.glow = glow;
+  g.scale.setScalar(ROSE_LANDMARK_SCALE);
+  glow.distance *= ROSE_LANDMARK_SCALE;
   placeOnSphere(g, NORTH_POLE, 0);
   scene.add(g);
-  registerSurfaceCollider(NORTH_POLE, 0.08, 'pole-rose');
+  registerSurfaceCollider(NORTH_POLE, 0.78 * ROSE_LANDMARK_SCALE / R, 'pole-rose');
   return g;
 })();
 // (main / village / lake roads are editable paths in DEFAULT_LAYOUT below.)
@@ -4722,16 +4762,33 @@ function migrateVillageComposition(layout) {
     && retiredTerraces.some((n) => dir(p).angleTo(n) < 0.001)));
 }
 
-function migrateSavedComposition(layout, raw) {
-  const key = 'HandulPlanet_composition_v106';
+function migrateRoseClearing(layout) {
+  const original = sphericalRing([0, 1, 0], 0.12, 16);
+  return layout.map((entry) => {
+    if (entry.id !== 'rose.quiet-garden' || entry.type !== 'courtyard') return entry;
+    const dirs = normalizePathDirs(entry);
+    if (dirs.length !== original.length || !dirs.every((dir, i) =>
+      dir.angleTo(new THREE.Vector3(...original[i]).normalize()) < 0.003)) return entry;
+    // Widen the public arrival area westward, away from Rodi's private forecourt.
+    const n = [[-0.10, -0.13], [0.105, -0.08], [0.115, 0.065], [-0.02, 0.115],
+      [-0.23, 0.045], [-0.30, -0.05], [-0.24, -0.16]]
+      .map(([x, z]) => new THREE.Vector3(x, 1, z).normalize().toArray());
+    const result = { ...entry, n };
+    delete result.points;
+    return result;
+  });
+}
+
+function migrateSavedComposition(layout, raw, version = '106', migrate = migrateVillageComposition) {
+  const key = `HandulPlanet_composition_v${version}`;
   try {
     if (localStorage.getItem(key)) return layout;
-    const next = migrateVillageComposition(layout);
+    const next = migrate(layout);
     if (JSON.stringify(next) !== JSON.stringify(layout)) {
       const backups = JSON.parse(localStorage.getItem(LAYOUT_BACKUP_KEY) || '[]');
       const kept = Array.isArray(backups) ? backups.slice(-4) : [];
       kept.push({ schemaVersion: LAYOUT_SCHEMA_VERSION, createdAt: new Date().toISOString(),
-        reason: 'before-composition-v106', layout: JSON.parse(raw) });
+        reason: `before-composition-v${version}`, layout: JSON.parse(raw) });
       // Do not change the saved arrangement unless its original is backed up.
       localStorage.setItem(LAYOUT_BACKUP_KEY, JSON.stringify(kept));
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
@@ -4746,12 +4803,172 @@ function migrateSavedComposition(layout, raw) {
   }
 }
 
-const DEFAULT_LAYOUT = migrateVillageComposition(migrateSpatialStructure(migrateVillageBoard(migrateSharedHarbor(migrateRoadJunctions(spreadWorldNeighborhoods([
+const SOUTH_DOCK_INNER = new THREE.Vector3(-0.56, -0.83, 0.06).normalize();
+const SOUTH_DOCK_END = new THREE.Vector3(-0.78, -0.63, 0.06).normalize();
+const SOUTH_GARDEN_LOOP = [[-0.32, -0.93, 0.17], [0, -0.93, 0.37],
+  [0.32, -0.93, 0.17], [0.32, -0.93, -0.10], [0, -0.98, -0.18],
+  [-0.32, -0.93, -0.10], [-0.32, -0.93, 0.17]];
+
+function migratePlaceIdentity(layout) {
+  const result = layout.map((entry) => ({ ...entry }));
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const dir = (p) => p.n ? unit(p.n) : mapDir(p.x, p.z);
+  const samePath = (p, points) => {
+    const actual = normalizePathDirs(p);
+    return actual.length === points.length && actual.every((n, i) => n.angleTo(unit(points[i])) < 0.003);
+  };
+  const rodi = result.find((p) => p.type === 'cottage' && p.ownerKey === 'rodi');
+  const oldSite = unit(WORLD_HOME_SITES.rodi.n), nextSite = unit([0.26, 0.87, 0.40]);
+  const center = mapDir(0, 0.10);
+  const occupied = result.some((p) => p !== rodi && p.kind !== 'path' && dir(p).angleTo(nextSite) < 0.32);
+  if (rodi && dir(rodi).angleTo(oldSite) < 0.003
+      && Math.abs(wrappedAngle((rodi.yaw ?? Math.PI) - Math.PI)) < 0.003 && !occupied) {
+    const front = center.clone().addScaledVector(nextSite, -center.dot(nextSite)).normalize();
+    const basis = tangentBasis(nextSite);
+    const oldFront = propFacing(oldSite, rodi.yaw || 0);
+    const reach = 0.27 * 0.92 * (rodi.scale ?? 1) + 0.026 + 0.06;
+    const oldEnd = offsetSurfaceDir(oldSite, oldFront, reach);
+    const nextEnd = offsetSurfaceDir(nextSite, front, reach);
+    const centerFront = nextSite.clone().addScaledVector(center, -nextSite.dot(center)).normalize();
+    const oldStart = offsetSurfaceDir(center, oldEnd.clone().addScaledVector(center, -oldEnd.dot(center)).normalize(), 0.205);
+    const nextStart = offsetSurfaceDir(center, centerFront, 0.205);
+    const rotation = new THREE.Quaternion().setFromUnitVectors(oldSite, nextSite);
+    const oldTangent = oldFront.clone().applyQuaternion(rotation);
+    const yawChange = Math.atan2(nextSite.dot(oldTangent.clone().cross(front)), oldTangent.dot(front));
+    const twist = new THREE.Quaternion().setFromAxisAngle(nextSite, yawChange);
+    for (const path of result) {
+      if (['road', 'streetEdge'].includes(path.type) && samePath(path, [oldStart.toArray(), oldEnd.toArray()])) {
+        path.n = [nextStart.toArray(), nextEnd.toArray()]; delete path.points;
+      }
+      if (path.id === 'rodi.forecourt') {
+        const points = normalizePathDirs(path);
+        const side = new THREE.Vector3().crossVectors(oldFront, oldSite).normalize();
+        const outline = [[-0.27, -0.13], [0.216, -0.15], [0.27, 0.02],
+          [0.2484, 0.23], [0.09, 0.31], [-0.2376, 0.24], [-0.27, 0.04]];
+        const original = outline.map(([x, z]) => oldSite.clone().addScaledVector(side, x)
+          .addScaledVector(oldFront, z).normalize().toArray());
+        // Preserve hand-edited shapes, even when they remain beside the old home.
+        if (samePath(path, original)) {
+          path.n = points.map((n) => n.clone().applyQuaternion(rotation).applyQuaternion(twist).toArray());
+          delete path.points;
+        }
+      }
+    }
+    rodi.n = nextSite.toArray(); rodi.yaw = Math.atan2(front.dot(basis.east), front.dot(basis.north));
+    delete rodi.x; delete rodi.z;
+  }
+  const anne = result.find((p) => p.type === 'cottage' && p.ownerKey === 'anne');
+  if (anne?.roof === 0x8faf8f) anne.roof = 0x3e785b;
+
+  const lighthouse = result.find((p) => p.type === 'lighthouse' && p.ownerKey === 'argos');
+  const lightFront = propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI);
+  const oldPier = [0.34, 0.60].map((d) => offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR, lightFront, d).toArray());
+  const pier = result.find((p) => p.type === 'deck' && samePath(p, oldPier));
+  if (lighthouse && dir(lighthouse).angleTo(HARBOR_REAR_LIGHTHOUSE_DIR) < 0.003 && pier) {
+    const head = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR, lightFront, 0.58);
+    const side = tangentBasis(head).east;
+    if (!result.some((p) => p.id === 'argos.pier-head')) result.push({ kind: 'path', type: 'deck',
+      id: 'argos.pier-head', districtId: 'argos', n: [-0.08, 0.08].map((d) => offsetSurfaceDir(head, side, d).toArray()) });
+    if (!result.some((p) => p.type === 'islandMooring' && dir(p).angleTo(head) < 0.10)) {
+      result.push({ type: 'islandMooring', n: head.toArray(), yaw: Math.PI, scale: 1 });
+    }
+  }
+  if (!result.some((p) => p.id === 'south.garden-loop')) {
+    const groves = [[-0.46, -0.83, 0.30], [0.48, -0.81, 0.32], [-0.13, -0.86, 0.49]];
+    const lookout = [0, -1, 0.07];
+    const sites = [lookout, ...groves].map(unit);
+    const custom = result.some((p) => p.kind !== 'path'
+      ? sites.some((n) => dir(p).angleTo(n) < 0.22)
+      : ['road', 'lane', 'deck', 'grass', 'courtyard'].includes(p.type)
+        && normalizePathDirs(p).some((point) => sites.some((n) => point.angleTo(n) < 0.22)));
+    if (!custom) {
+      result.push({ kind: 'path', type: 'deck', id: 'south.landing', districtId: 'south',
+        n: [SOUTH_DOCK_INNER.toArray(), SOUTH_DOCK_END.toArray()] },
+      { kind: 'path', type: 'lane', id: 'south.arrival', districtId: 'south',
+        n: [SOUTH_DOCK_INNER.toArray(), SOUTH_GARDEN_LOOP[0]] },
+      { kind: 'path', type: 'lane', id: 'south.garden-loop', districtId: 'south', n: SOUTH_GARDEN_LOOP },
+      { type: 'islandMooring', n: SOUTH_DOCK_END.toArray(), yaw: 0, scale: 1 },
+      { type: 'windLookout', n: lookout, scale: 1 });
+      for (const n of groves) result.push({ type: 'paperGrove', n, scale: 1 });
+    }
+  }
+  return result;
+}
+
+const WORLD_DISTRICT_LAYOUT = migratePlaceIdentity(migrateRoseClearing(migrateVillageComposition(migrateSpatialStructure(migrateVillageBoard(migrateSharedHarbor(migrateRoadJunctions(spreadWorldNeighborhoods([
   ...HARBOR_TERRAIN_LAYOUT,
   ...HARBOR_DISTRICT_INFRASTRUCTURE,
   ...HARBOR_FRONT_LAYOUT,
   ...HARBOR_REAR_LAYOUT,
-]))))));
+]))))))));
+
+function migrateVillageFrontage(layout) {
+  const result = layout.map((p) => ({ ...p }));
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const dir = (p) => p.n ? unit(p.n) : mapDir(p.x, p.z);
+  const matches = (p, original) => {
+    const points = normalizePathDirs(p), expected = normalizePathDirs(original);
+    return points.length === expected.length && points.every((n, i) => n.angleTo(expected[i]) < 0.003);
+  };
+  const retired = new Set();
+  for (const [key, sign, redundantType] of [['jarvis', -1, 'clockKiosk'], ['yul', 1, 'repairShed']]) {
+    const home = result.find((p) => p.ownerKey === key && p.type === 'cottage');
+    const oldHome = WORLD_DISTRICT_LAYOUT.find((p) => p.ownerKey === key);
+    const court = result.find((p) => p.id === `${key}.forecourt`);
+    const oldCourt = WORLD_DISTRICT_LAYOUT.find((p) => p.id === `${key}.forecourt`);
+    if (!home || dir(home).angleTo(dir(oldHome)) > 0.003
+        || Math.abs(wrappedAngle((home.yaw || 0) - oldHome.yaw)) > 0.003
+        || (court && !matches(court, oldCourt))) continue;
+    const originalProp = WORLD_DISTRICT_LAYOUT.find((p) => p.type === redundantType);
+    const redundant = result.find((p) => p.type === redundantType
+      && dir(p).angleTo(dir(originalProp)) < 0.003
+      && Math.abs((p.scale ?? 1) - (originalProp.scale ?? 1)) < 0.001
+      && Math.abs(wrappedAngle((p.yaw || 0) - (originalProp.yaw || 0))) < 0.003);
+    const site = unit([sign * 0.62, 0.60, 0.505]);
+    if (result.some((p) => p.kind !== 'path' && p !== home && p !== redundant
+      && dir(p).angleTo(site) < 0.32)) continue;
+    const oldJunction = mapDir(sign < 0 ? -0.86 : 0.74, sign < 0 ? 0.08 : 0.10);
+    const templates = WORLD_DISTRICT_LAYOUT.filter((p) => ['road', 'streetEdge', 'lane', 'laneEdge'].includes(p.type)
+      && normalizePathDirs(p).some((n) => n.angleTo(oldJunction) < 0.003));
+    const streets = templates.map((original) => ({ original,
+      path: result.find((p) => p.type === original.type && matches(p, original)) }));
+    // Move a block only when its original street and curb geometry still agree.
+    if (streets.length !== 4 || streets.some(({ path }) => !path)) continue;
+    const junction = unit([sign * 0.66, 0.39, 0.64]);
+    const street = unit([sign * 0.40, 0.49, 0.78]);
+    const front = street.clone().addScaledVector(site, -street.dot(site)).normalize();
+    const old = dir(home), oldFront = propFacing(old, home.yaw || 0);
+    const rotation = new THREE.Quaternion().setFromUnitVectors(old, site);
+    const tangent = oldFront.clone().applyQuaternion(rotation);
+    const twist = new THREE.Quaternion().setFromAxisAngle(site,
+      Math.atan2(site.dot(tangent.clone().cross(front)), tangent.dot(front)));
+    if (court) {
+      court.n = normalizePathDirs(court).map((n) => {
+        const moved = n.clone().applyQuaternion(rotation).applyQuaternion(twist);
+        const angle = site.angleTo(moved);
+        const along = moved.addScaledVector(site, -moved.dot(site)).normalize();
+        return offsetSurfaceDir(site, along, angle * 0.72).toArray();
+      });
+      delete court.points;
+    }
+    const basis = tangentBasis(site);
+    home.n = site.toArray(); home.yaw = Math.atan2(front.dot(basis.east), front.dot(basis.north));
+    delete home.x; delete home.z;
+    for (const { path, original } of streets) {
+      const points = normalizePathDirs(original);
+      const reverse = points.at(-1).angleTo(oldJunction) < 0.003;
+      const far = reverse ? points[0] : points.at(-1);
+      const middle = ['road', 'streetEdge'].includes(path.type) ? street : unit([sign * 0.85, 0.45, 0.24]);
+      const next = [junction.toArray(), middle.toArray(), far.toArray()];
+      path.n = reverse ? next.reverse() : next;
+      delete path.points;
+    }
+    if (redundant) retired.add(redundant);
+  }
+  return result.filter((p) => !retired.has(p));
+}
+
+const DEFAULT_LAYOUT = migrateVillageFrontage(WORLD_DISTRICT_LAYOUT);
 
 // Home driveways are terrain tied to each service-home spot — regenerated
 // whenever the layout changes, so they follow the houses around in edit mode.
@@ -4764,7 +4981,7 @@ function homeDoorDir(home) {
   if (!home?.mesh || !home.dir) return null;
   const local = home.mesh.userData.doorOffset;
   if (!local) return home.dir.clone();
-  home.mesh.updateMatrixWorld(true);
+  // localToWorld updates this node and its ancestors, without traversing the house.
   return home.mesh.localToWorld(local.clone()).normalize();
 }
 const drivewayGroup = new THREE.Group();
@@ -4891,7 +5108,8 @@ function sharedHarborState() {
     && editablePaths.some((item) => item.data.type === 'openWater');
   const coast = islandChecked ? lighthouseIsletOutline(0.065).slice(0, -1).map((n) => new THREE.Vector3(...n)) : [];
   const pierEnd = offsetSurfaceDir(HARBOR_REAR_LIGHTHOUSE_DIR, propFacing(HARBOR_REAR_LIGHTHOUSE_DIR, Math.PI), 0.68);
-  const mooring = offsetSurfaceDir(pierEnd, tangentBasis(pierEnd).east, 0.16);
+  // Sample open water outside the new T-head's walkable deck margin.
+  const mooring = offsetSurfaceDir(pierEnd, tangentBasis(pierEnd).east, 0.20);
   const landing = islandChecked ? nearestDryShoreDirection(mooring) : null;
   const island = { checked: islandChecked, coastSamples: coast.length,
     waterSamples: coast.filter(isWaterSurfaceDir).length,
@@ -5044,22 +5262,23 @@ function isObjectInside(object, ancestor) {
   return false;
 }
 
-function labelOccludedByBuilding(label, buildings) {
+function labelOcclusionReason(label, buildings) {
   const { target } = label;
   const probeHeight = label.kind === 'agent' || label.kind === 'player' || label.kind === 'bubble'
     ? 0.72
     : label.kind === 'landmark' ? 1.1 : 0;
   target.localToWorld(_labelOcclusionPoint.set(0, probeHeight, 0));
+  if (segmentOccludedBySphere(camera.position, _labelOcclusionPoint, R - 0.08)) return 'planet';
   _labelRayDirection.copy(_labelOcclusionPoint).sub(camera.position);
   const distance = _labelRayDirection.length();
-  if (distance < 0.5) return false;
+  if (distance < 0.5) return '';
   _labelRayDirection.multiplyScalar(1 / distance);
   _labelRaycaster.set(camera.position, _labelRayDirection);
   _labelRaycaster.near = 0.08;
   _labelRaycaster.far = Math.max(0.1, distance - 0.34);
-  if (!buildings.length) return false;
+  if (!buildings.length) return '';
   return _labelRaycaster.intersectObjects(buildings, true)
-    .some((hit) => !isObjectInside(hit.object, target));
+    .some((hit) => !isObjectInside(hit.object, target)) ? 'building' : '';
 }
 
 function labelPriority(label) {
@@ -5078,17 +5297,13 @@ function screenRectCollides(rect, accepted, padding = 4) {
   ));
 }
 
+const labelUiObstacles = [...document.querySelectorAll(
+  '.hud, #weather, #agentbarWrap, .agent-card, .team-panel, .service-panel, #planetCompass',
+)];
 function addLabelUiObstacles(accepted) {
-  const elements = [
-    document.querySelector('.hud'),
-    document.getElementById('weather'),
-    document.getElementById('agentbarWrap'),
-    document.querySelector('.agent-card.show'),
-    document.querySelector('.team-panel.show'),
-    document.querySelector('.service-panel.show'),
-  ];
-  for (const element of elements) {
-    if (!element || element.offsetParent === null) continue;
+  for (const element of labelUiObstacles) {
+    if (element.matches('.agent-card, .team-panel, .service-panel') && !element.classList.contains('show')) continue;
+    if (!element.getClientRects().length) continue;
     const rect = element.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) accepted.push(rect);
   }
@@ -5151,11 +5366,12 @@ function updateWorldLabels() {
     }
 
     if ((worldLabelFrame + label.occlusionPhase) % 3 === 0) {
-      label.occluded = labelOccludedByBuilding(label, buildingOccluders);
+      label.occlusionReason = labelOcclusionReason(label, buildingOccluders);
+      label.occluded = !!label.occlusionReason;
     }
     if (label.occluded) {
       element.hidden = true;
-      label.hiddenReason = 'building';
+      label.hiddenReason = label.occlusionReason;
       continue;
     }
 
@@ -5873,7 +6089,7 @@ function animateCharacterWalk(char, move01, t) {
   }
 }
 
-const CHARACTER_WORLD_SCALE = 0.84;
+const CHARACTER_WORLD_SCALE = 0.72;
 const player = makeCharacter(save.data.modelFiles.base, 0xffe8cf, '한들');   // 나 — avatar color from saved state
 batchStaticMeshTree(player);
 player.scale.setScalar(CHARACTER_WORLD_SCALE);
@@ -6728,11 +6944,11 @@ const DESKTOP_CINEMATIC_CAM_DIST = 26;
 const DASHBOARD_CAM_DIST = 21.5;
 const MOBILE_DASHBOARD_CAM_DIST = 44.0;
 const MOBILE_INTRO_CAM_DIST = 46.0;
-const EXPLORE_CAM_DIST = 4.3;
-const MOBILE_EXPLORE_CAM_DIST = 5.2;
+const EXPLORE_CAM_DIST = 6.3;
+const MOBILE_EXPLORE_CAM_DIST = 7.2;
 const DASHBOARD_CAM_PITCH = 1.00;
-const EXPLORE_CAM_PITCH = 0.34;
-const MOBILE_EXPLORE_CAM_PITCH = 0.44;
+const EXPLORE_CAM_PITCH = 0.72;
+const MOBILE_EXPLORE_CAM_PITCH = 0.78;
 let camDist = DASHBOARD_CAM_DIST;
 let experienceMode = 'dashboard';
 
@@ -6760,6 +6976,14 @@ function dashboardLookHeight() {
   return innerWidth / Math.max(1, innerHeight) > 1.5 ? 5.2 : 3.9;
 }
 
+const _exploreLookTarget = new THREE.Vector3();
+function exploreLookTarget() {
+  // Frame the body and the street ahead, not the sky above the visitor's head.
+  return _exploreLookTarget.copy(player.position)
+    .addScaledVector(playerDir, CHARACTER_WORLD_SCALE * 0.6)
+    .addScaledVector(camDir, 0.45);
+}
+
 function snapFollowCamera() {
   const dashboard = experienceMode === 'dashboard';
   const up = dashboard ? DASHBOARD_VIEW_DIR.clone().applyAxisAngle(dashboardOrbitAxis, dashboardYaw)
@@ -6772,7 +6996,7 @@ function snapFollowCamera() {
   camera.up.copy(up);
   camera.lookAt(dashboard
     ? up.clone().multiplyScalar(dashboardLookHeight())
-    : player.position.clone().add(up.multiplyScalar(0.8)));
+    : exploreLookTarget());
 }
 
 function startCameraIntro() {
@@ -7351,7 +7575,7 @@ function updateAmbientScene(t, atmosphere = {}) {
       beacon.orbitPivot.rotation.y = t * 0.32 + phase;
       beacon.orbitPivot.rotation.z = Math.sin(t * 0.24 + phase) * 0.18;
       beacon.nodes.forEach((node, index) => {
-        node.mesh.position.y = 0.82 + Math.sin(t * 1.18 + phase + index * 0.72) * 0.018;
+        node.mesh.position.y = (node.baseY ?? 0.82) + Math.sin(t * 1.18 + phase + index * 0.72) * 0.006;
       });
     }
     const signature = root.userData.signatureMotion;
@@ -7389,6 +7613,7 @@ function updateAmbientScene(t, atmosphere = {}) {
     }
   }
   for (const marker of homeMarkers) {
+    if (!marker.parent?.visible) continue;
     const cloth = marker.userData.cloth;
     if (!cloth) continue;
     const phase = marker.userData.motionPhase || 0;
@@ -7408,9 +7633,11 @@ function updateAmbientScene(t, atmosphere = {}) {
       positions.needsUpdate = true;
     }
   }
-  const rosePulse = 0.5 + Math.sin(t * 1.35) * 0.5;
-  poleRose.userData.roseHead.rotation.y = Math.sin(t * 0.38) * 0.12;
-  poleRose.userData.glow.intensity = 0.32 + rosePulse * 0.18;
+  if (poleRose.visible) {
+    const rosePulse = 0.5 + Math.sin(t * 1.35) * 0.5;
+    poleRose.userData.roseHead.rotation.y = Math.sin(t * 0.38) * 0.12;
+    poleRose.userData.glow.intensity = 0.32 + rosePulse * 0.18;
+  }
 }
 
 // Three.js frustum culling cannot know that the opaque planet hides the far
@@ -7890,6 +8117,19 @@ function exitEditMode() {
 // ---------------------------------------------------------------------------
 let lastDevMetricsAt = -1;
 let paperPixelSamples = 0;
+const landmarkCompass = createLandmarkCompass(document.getElementById('planetCompass'));
+const compassRight = new THREE.Vector3();
+let lastCompassFrame = -Infinity;
+function updateLandmarkCompass(now) {
+  if (now - lastCompassFrame < 50 || document.body.classList.contains('intro-active')) return;
+  lastCompassFrame = now;
+  camera.updateMatrixWorld();
+  compassRight.setFromMatrixColumn(camera.matrixWorld, 0);
+  landmarkCompass.update(now, {
+    origin: experienceMode === 'explore' ? playerDir : camera.position,
+    right: compassRight, north: NORTH_POLE, lighthouse: ARGOS_AGENT?.home?.dir,
+  });
+}
 function publishDevMetrics(elapsed) {
   if (!URL_PARAMS.has('dev') || elapsed - lastDevMetricsAt < 0.5) return;
   lastDevMetricsAt = elapsed;
@@ -7922,6 +8162,7 @@ function publishDevMetrics(elapsed) {
   document.documentElement.dataset.qaEfficiency = JSON.stringify({
     loop: worldLoop.state(), labels: labelSizeCache.state(),
   });
+  document.documentElement.dataset.qaCompass = JSON.stringify(landmarkCompass.state());
   document.documentElement.dataset.qaAudio = JSON.stringify(ambientAudio.state());
   document.documentElement.dataset.qaSignatures = JSON.stringify(
     AGENTS.map((agent) => ({
@@ -8036,9 +8277,9 @@ function animate(dt, elapsed, now) {
   // Keep a comfortable point behind the visitor as a recovery anchor. When a
   // layout edit or a narrow collider wedge leaves too few exits, recover after
   // a short grace period; simply walking into one wall never teleports anyone.
-  const playerClear = playerSurfaceAllowed(playerDir)
-    && hasSurfaceClearance(playerDir, PLAYER_CLEARANCE_RADIUS);
-  const roomyClearance = surfaceColliderClearance(playerDir) > PLAYER_CLEARANCE_RADIUS + 0.035;
+  const playerClearance = surfaceColliderClearance(playerDir);
+  const playerClear = playerSurfaceAllowed(playerDir) && playerClearance >= PLAYER_CLEARANCE_RADIUS;
+  const roomyClearance = playerClearance > PLAYER_CLEARANCE_RADIUS + 0.035;
   if (!activeBoatItem && playerClear && roomyClearance) lastSafePlayerDir.copy(playerDir);
   let needsRecovery = !playerClear;
   if (!needsRecovery && Math.abs(fwd) > 0.001 && !playerMoved) {
@@ -8154,7 +8395,7 @@ function animate(dt, elapsed, now) {
         .lerp(_focusLookTarget, destinationBlend);
       camera.lookAt(_focusTransitLookTarget);
     } else {
-      camera.lookAt(player.position.clone().add(up.clone().multiplyScalar(0.8)));
+      camera.lookAt(exploreLookTarget());
     }
   }
 
@@ -8177,6 +8418,7 @@ function animate(dt, elapsed, now) {
   updateHorizonCulling();
   updateAmbientScene(elapsed, atmosphere);
   ambientAudio.update({ elapsed, ...atmosphere });
+  updateLandmarkCompass(now);
   updateWorldLabels();
 
   // Argos's lighthouse works as a live status landmark: the gold beam only
@@ -8748,10 +8990,11 @@ addEventListener('keydown', anyKeyStart);
   dashboardCloseTeam = closeTeamOverview;
 
   function setBarCollapsed(collapsed) {
+    if (collapsed && barEl.contains(document.activeElement)) barToggle?.focus({ preventScroll: true });
     barWrap?.classList.toggle('collapsed', collapsed);
     barToggle?.setAttribute('aria-expanded', String(!collapsed));
   }
-  const agentBarBreakpoint = matchMedia('(max-width: 520px)');
+  const agentBarBreakpoint = matchMedia('(max-width: 900px)');
   let barCollapseTouched = false;
   barToggle?.addEventListener('click', () => {
     barCollapseTouched = true;
@@ -10009,8 +10252,18 @@ if (URL_PARAMS.has('dev')) {
       commitPlayerSurfaceDirection(offsetSurfaceDir(NORTH_POLE, new THREE.Vector3(1, 0, 0), 0.20));
       playerForward.copy(NORTH_POLE).addScaledVector(playerDir, -NORTH_POLE.dot(playerDir)).normalize();
       camDir.copy(playerForward);
-      camDist = 7;
-      camPitch = 0.42;
+    });
+  }
+  if (URL_PARAMS.get('qaView') === 'place') {
+    queueMicrotask(() => {
+      const key = URL_PARAMS.get('qaPlace');
+      const place = key === 'south' ? editables.find((p) => p.data.type === 'windLookout')
+        : AGENTS.find((a) => a.key === key)?.home;
+      if (!place) return;
+      beginGame('explore', { cinematic: false });
+      commitPlayerSurfaceDirection(offsetSurfaceDir(place.dir, propFacing(place.dir, place.data.yaw || 0), 0.38));
+      playerForward.copy(place.dir).addScaledVector(playerDir, -place.dir.dot(playerDir)).normalize();
+      camDir.copy(playerForward);
     });
   }
   const objectScreenState = (object, opacity = 1) => {
@@ -10137,23 +10390,25 @@ if (URL_PARAMS.has('dev')) {
           && paths.hedge >= 2
           && paths.quayRail >= 2
           && new Set(profiles).size >= 3
-          && minimumHomeDistance >= 6
+          && minimumHomeDistance >= 3.4
           && rearHemisphereHomes >= 3,
       };
     },
     worldScaleState() {
       const visitorHeight = player.userData.modelHeight * player.scale.y;
       const homes = AGENTS
-        .filter((agent) => agent.home?.data.type === 'cottage')
+        .filter((agent) => HOME_PROP_TYPES.has(agent.home?.data.type))
         .map((agent) => {
           const spec = agent.home.mesh.userData.scaleSpec;
           const agentHeight = agent.npc.userData.modelHeight * agent.npc.scale.y;
+          const doorHeight = (spec?.doorHeightLocal || 0) * agent.home.mesh.scale.y;
           return {
             key: agent.key,
             profile: spec?.profile || null,
-            doorHeight: +(spec?.doorHeight || 0).toFixed(3),
+            doorHeight: +doorHeight.toFixed(3),
             agentHeight: +agentHeight.toFixed(3),
-            doorToAgent: spec ? +(spec.doorHeight / agentHeight).toFixed(2) : null,
+            doorToAgent: spec ? +(doorHeight / agentHeight).toFixed(2) : null,
+            doorToVisitor: spec ? +(doorHeight / visitorHeight).toFixed(2) : null,
           };
         });
       return {
@@ -10161,6 +10416,7 @@ if (URL_PARAMS.has('dev')) {
         roadWidth: 0.90,
         laneWidth: 0.70,
         homes,
+        pass: homes.length === 6 && homes.every((home) => home.doorToAgent >= 1.10 && home.doorToVisitor >= 1.15),
       };
     },
     mobilityState() {
@@ -10261,8 +10517,40 @@ if (URL_PARAMS.has('dev')) {
         if (!stages.sailToIsland) return { pass: false, stages, reason: 'island-route-blocked' };
         stages.landOnIsland = disembarkBoat({ notify: false });
         if (!stages.landOnIsland) return { pass: false, stages, reason: 'island-landing-blocked' };
+        const landing = playerDir.clone();
+        const lighthouse = AGENTS.find((agent) => agent.key === 'argos')?.home;
+        const door = homeDoorDir(lighthouse);
+        if (!door) return { pass: false, stages, reason: 'lighthouse-door-missing' };
+        const entrance = offsetSurfaceDir(door, propFacing(lighthouse.dir, lighthouse.data.yaw || 0), 0.04);
+        const footRoute = findSurfaceRoute(playerDir, entrance,
+          (dir) => playerSurfaceAllowed(dir, false) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS));
+        stages.walkToLighthouseDoor = travel(footRoute) && playerDir.angleTo(door) < 0.18;
+        stages.returnToIslandPier = stages.walkToLighthouseDoor && travel([...footRoute].reverse())
+          && playerDir.angleTo(landing) < 0.01;
+        if (!stages.returnToIslandPier) return { pass: false, stages, reason: 'lighthouse-foot-route-blocked' };
         stages.reboard = nearestBoardableBoat() === boat && boardBoat(boat);
         if (!stages.reboard) return { pass: false, stages, reason: 'island-reboarding-blocked' };
+        const southPath = editablePaths.find((p) => p.data.id === 'south.garden-loop');
+        if (southPath) {
+          const outward = SOUTH_DOCK_END.clone().sub(SOUTH_DOCK_INNER);
+          outward.addScaledVector(SOUTH_DOCK_END, -outward.dot(SOUTH_DOCK_END)).normalize();
+          const southMooring = offsetSurfaceDir(SOUTH_DOCK_END, outward, 0.18);
+          stages.sailToSouthGarden = travel(findSurfaceRoute(playerDir, southMooring,
+            (dir) => playerSurfaceAllowed(dir, true) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS)));
+          stages.landAtSouthGarden = stages.sailToSouthGarden && disembarkBoat({ notify: false });
+          if (!stages.landAtSouthGarden) return { pass: false, stages, reason: 'south-landing-blocked' };
+          const southLanding = playerDir.clone();
+          const approach = findSurfaceRoute(playerDir, southPath.data.dirs[0],
+            (dir) => playerSurfaceAllowed(dir, false) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS));
+          stages.walkSouthGarden = travel(approach) && travel(splineDirs(southPath.data.dirs, { step: 0.012 }).dirs);
+          stages.returnToSouthPier = stages.walkSouthGarden && travel([...approach].reverse())
+            && playerDir.angleTo(southLanding) < 0.01;
+          stages.reboardSouth = stages.returnToSouthPier && nearestBoardableBoat() === boat && boardBoat(boat);
+          if (!stages.reboardSouth) return { pass: false, stages, reason: 'south-walk-or-reboarding-blocked' };
+          stages.returnToIslandWaters = travel(findSurfaceRoute(playerDir, mooring,
+            (dir) => playerSurfaceAllowed(dir, true) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS)));
+          if (!stages.returnToIslandWaters) return { pass: false, stages, reason: 'south-return-route-blocked' };
+        }
         stages.sailHome = travel([...route].reverse());
         stages.landAtHarbor = stages.sailHome && disembarkBoat({ notify: false });
         if (!stages.landAtHarbor) return { pass: false, stages, reason: 'harbor-return-blocked' };
@@ -10599,6 +10887,40 @@ if (URL_PARAMS.has('dev')) {
       const p = document.getElementById('enterPrompt');
       return { editMode, cls: p.className, text: p.textContent };
     },
+    testHomeWalks() {
+      if (activeBoatItem) return { pass: false, reason: 'already-aboard', homes: [] };
+      const original = { player: playerDir.clone(), forward: playerForward.clone(), camera: camDir.clone(),
+        safe: lastSafePlayerDir.clone(), mode: experienceMode, blocked: playerBlockedFor };
+      const homes = [];
+      const streets = editablePaths.filter((p) => ['road', 'lane'].includes(p.data.type)
+        && p.data.dirs.some((n) => n.y > 0)).map((p) => splineDirs(p.data.dirs, { step: 0.025 }).dirs);
+      const allowed = (dir) => playerSurfaceAllowed(dir, false) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS);
+      const walk = (points) => walkSurfaceRoute(points, {
+        getPosition: () => playerDir, move: tryMovePlayerOnSurface, allowed,
+      });
+      try {
+        experienceMode = 'explore';
+        commitPlayerSurfaceDirection(DEFAULT_PLAYER_SPAWN_DIR);
+        for (const agent of AGENTS.filter((a) => a.home?.data.type === 'cottage')) {
+          const door = homeDoorDir(agent.home);
+          const link = drivewayConnections.find((entry) => entry.home === agent.home);
+          if (!door || !link) { homes.push({ key: agent.key, pass: false, reason: 'missing-driveway' }); break; }
+          const entrance = offsetSurfaceDir(door, propFacing(agent.home.dir, agent.home.data.yaw || 0), 0.04);
+          const approach = findStreetRoute(playerDir, link.end, streets, allowed);
+          const outward = walk(approach && [...approach, entrance]);
+          const reachedDoor = outward.pass && playerDir.angleTo(door) < 0.18;
+          const back = reachedDoor ? walk([link.end, ...approach.slice().reverse()]) : null;
+          homes.push({ key: agent.key, outward, reachedDoor, back,
+            pass: reachedDoor && !!back?.pass && playerDir.angleTo(DEFAULT_PLAYER_SPAWN_DIR) < 0.01 });
+          if (!homes.at(-1).pass) break;
+        }
+        return { routing: 'authored-streets', homes, pass: homes.length === 5 && homes.every((home) => home.pass) };
+      } finally {
+        playerDir.copy(original.player); playerForward.copy(original.forward); camDir.copy(original.camera);
+        lastSafePlayerDir.copy(original.safe); experienceMode = original.mode; playerBlockedFor = original.blocked;
+        updateServiceProximity();
+      }
+    },
     testAllHomes() {
       const originalDir = playerDir.clone();
       const originalMode = experienceMode;
@@ -10655,6 +10977,8 @@ if (URL_PARAMS.has('dev')) {
   if (URL_PARAMS.get('qa') === '1') {
     queueMicrotask(() => {
       const homes = window.devPlanet.testAllHomes();
+      const homeWalks = window.devPlanet.testHomeWalks();
+      document.documentElement.dataset.qaHomeWalks = JSON.stringify(homeWalks);
       const coverage = window.devPlanet.terrainCoverage();
       const waterAccess = window.devPlanet.waterAccessState();
       const boatLifecycle = window.devPlanet.testBoatLifecycle();
@@ -10709,6 +11033,7 @@ if (URL_PARAMS.has('dev')) {
       });
       document.documentElement.dataset.qaRecovery = JSON.stringify(window.devPlanet.testPlayerRecovery());
       document.documentElement.dataset.qaReady = homes.every((item) => item.ok)
+        && homeWalks.pass
         && window.devPlanet.layoutAudit().status === 'ready'
         && window.devPlanet.townWalkability().pass
         && coverage.waterPercent >= 34
@@ -10718,6 +11043,7 @@ if (URL_PARAMS.has('dev')) {
         && marineEnvironment.pass
         && homeStreetAccess.pass
         && district.pass
+        && window.devPlanet.worldScaleState().pass
         && roadClearance.pass
         && sharedHarbor.pass
         && network.connected

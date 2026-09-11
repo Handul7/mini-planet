@@ -12,7 +12,7 @@ function fn(name) {
 }
 const context = vm.createContext({ THREE });
 vm.runInContext([
-  ...['tangentBasis', 'offsetSurfaceDir', 'propFacing', 'canonicalMapYaw', 'normalizePathDirs'].map(fn),
+  ...['tangentBasis', 'offsetSurfaceDir', 'propFacing', 'canonicalMapYaw', 'wrappedAngle', 'normalizePathDirs'].map(fn),
   source.slice(source.indexOf('const MAP_CENTER ='), source.indexOf('const DEFAULT_PLAYER_SPAWN_DIR =')),
   source.slice(source.indexOf('const AGENT_DISTRICT_ANCHORS ='), source.indexOf('const DASHBOARD_VIEW_DIR =')),
   source.slice(source.indexOf('function sphericalRing('), source.indexOf('// Home driveways are terrain')),

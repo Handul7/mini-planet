@@ -116,7 +116,7 @@ test('exploration starts clear and includes player recovery contracts', () => {
   assert.match(mainSource, /function recoverPlayerToSafeSurface\(/);
   assert.match(mainSource, /playerEscapeOptionCount\(/);
   assert.match(mainSource, /spawnN: DEFAULT_PLAYER_SPAWN_DIR\.toArray\(\)/);
-  assert.match(mainSource, /const EXPLORE_CAM_DIST = 4\.3/);
+  assert.match(mainSource, /const EXPLORE_CAM_DIST = 6\.3/);
 });
 
 test('legacy neighborhood seeds retain their migration coordinates', () => {

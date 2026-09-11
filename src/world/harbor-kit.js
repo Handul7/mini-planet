@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three/build/three.module.min.js';
 import { mergeGeometries } from '../../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
 import { makePaperCanopy } from '../paper-style.js?v=97';
-import { makePaperSlab } from './paper-assets.js?v=105';
+import { makePaperSlab } from './paper-assets.js?v=110';
 
 function paperRoofPanels(specs, material) {
   const group = new THREE.Group();
@@ -64,26 +64,87 @@ export function makeCottageArchitecture({ ownerKey, wallMaterial, roofMaterial, 
     return group;
   }
 
-  if (['jarvis', 'yul'].includes(ownerKey)) {
-    group.userData.architectureProfile = 'harbor-workshop';
+  if (ownerKey === 'jarvis') {
+    group.userData.architectureProfile = 'memory-control-house';
+    group.add(paperRoofPanels([
+      { size: [3.92, 0.10, 3.78], position: [0, 2.69, 0] },
+      { size: [3.44, 0.10, 3.24], position: [0, 2.83, -0.06] },
+      { size: [2.96, 0.10, 2.72], position: [0, 2.97, -0.12] },
+    ], roofMaterial));
+    group.add(mergedBoxes([
+      { size: [0.16, 2.30, 0.13], position: [-1.73, 1.40, 1.74] },
+      { size: [0.16, 2.30, 0.13], position: [1.73, 1.40, 1.74] },
+      { size: [3.48, 0.12, 0.14], position: [0, 2.48, 1.74] },
+    ], edgeMaterial));
+    return group;
+  }
+
+  if (ownerKey === 'yul') {
+    group.userData.architectureProfile = 'resonance-sawtooth-workshop';
+    group.add(paperRoofPanels([-1.20, 0, 1.20].map((z) => ({
+      size: [3.82, 0.08, 1.35], position: [0, 2.95, z], rotation: [-0.25, 0, 0],
+    })), roofMaterial));
+    group.add(mergedBoxes([-1.70, -0.50, 0.70].map((z) => ({
+      size: [3.42, 0.24, 0.045], position: [0, 2.82, z],
+    })), glassMaterial));
     group.add(
       paperRoofPanels([
         { size: [1.92, 0.12, 0.78], position: [0, 2.34, 1.87], rotation: [-0.08, 0, 0] },
-        { size: [0.78, 0.11, 0.68], position: [side * 0.90, 3.80, -0.30], rotation: [0, 0, side * 0.09] },
       ], roofMaterial),
       mergedBoxes([
         { size: [0.09, 1.46, 0.09], position: [-0.78, 0.77, 2.04] },
         { size: [0.09, 1.46, 0.09], position: [0.78, 0.77, 2.04] },
-        { size: [0.66, 0.48, 0.56], position: [side * 0.90, 3.53, -0.30] },
       ], edgeMaterial),
-      mergedBoxes([
-        { size: [0.39, 0.24, 0.045], position: [side * 0.90, 3.55, 0.00] },
-      ], glassMaterial),
     );
     return group;
   }
 
-  group.userData.architectureProfile = 'garden-studio';
+  if (ownerKey === 'ludwig') {
+    group.userData.architectureProfile = 'moon-vault-library';
+    for (let layer = 0; layer < 3; layer++) {
+      const shape = new THREE.Shape();
+      const radius = 1.96 - layer * 0.065;
+      shape.moveTo(-radius, 0);
+      for (let i = 0; i <= 16; i++) {
+        const angle = Math.PI - i / 16 * Math.PI;
+        shape.lineTo(Math.cos(angle) * radius, Math.sin(angle) * (1.02 - layer * 0.04));
+      }
+      shape.closePath();
+      const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {
+        depth: 3.74 + layer * 0.075, bevelEnabled: false, curveSegments: 1,
+      }), layer === 1 ? edgeMaterial : roofMaterial);
+      roof.position.set(0, 2.65 + layer * 0.055, -(3.74 + layer * 0.075) / 2);
+      roof.castShadow = true;
+      group.add(roof);
+    }
+    group.add(mergedBoxes([-1.70, 1.70].map((x) => ({
+      size: [0.20, 2.30, 0.20], position: [x, 1.40, 1.71],
+    })), edgeMaterial));
+    group.add(mergedBoxes([-1.05, -0.70, 0.70, 1.05].map((x) => ({
+      size: [0.08, 0.83, 0.08], position: [x, 1.45, 1.80],
+    })), roofMaterial));
+    return group;
+  }
+
+  group.userData.architectureProfile = ownerKey === 'anne' ? 'green-gables-atelier' : 'garden-studio';
+  if (ownerKey === 'anne') {
+    group.add(mergedBoxes([-1, 1].map((side) => ({
+      size: [2.02, 0.10, 0.10], position: [side * 0.84, 3.02, 1.88], rotation: [0, 0, -side * 0.47],
+    })), roofMaterial));
+    group.add(paperRoofPanels([
+      { size: [3.45, 0.08, 0.85], position: [0, 2.23, 1.88], rotation: [-0.10, 0, 0] },
+    ], roofMaterial));
+    group.add(mergedBoxes([-1.52, 1.52].map((x) => ({
+      size: [0.12, 1.96, 0.12], position: [x, 1.18, 2.06],
+    })), edgeMaterial));
+    group.add(mergedBoxes([-1.12, 1.12].map((x) => ({
+      size: [0.82, 0.22, 0.24], position: [x, 0.98, 1.86],
+    })), roofMaterial));
+    const flowers = new THREE.MeshToonMaterial({ color: 0xdca5b6, gradientMap: roofMaterial.gradientMap ?? null });
+    group.add(mergedBoxes([-1.36, -1.12, -0.88, 0.88, 1.12, 1.36].map((x) => ({
+      size: [0.11, 0.12, 0.12], position: [x, 1.14, 1.88], rotation: [0, 0, 0.35],
+    })), flowers));
+  }
   group.add(
     paperRoofPanels([
       { size: [0.86, 0.14, 1.48], position: [side * 0.71, 3.54, -0.05], rotation: [0, 0, -side * 0.45] },

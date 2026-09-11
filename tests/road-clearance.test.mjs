@@ -30,9 +30,9 @@ const colliders = api.DEFAULT_LAYOUT.filter((p) => p.kind !== 'path' && api.PROP
   radius: api.PROP_DEFS[p.type].collider * (api.PROP_DEFS[p.type].baseScale ?? 1) * (p.scale ?? 1),
 }));
 
-function audit(layout, water = () => false) {
+function audit(layout, water = () => false, obstacles = colliders) {
   context.editablePaths = paths(layout);
-  context.getSurfaceColliders = () => colliders;
+  context.getSurfaceColliders = () => obstacles;
   context.isWaterSurfaceDir = water;
   return api.roadClearanceState();
 }
@@ -41,7 +41,9 @@ test('new road clearance gate detects the formerly blocked intersection and Rodi
   const original = api.DEFAULT_LAYOUT.filter((p) => !['road', 'streetEdge'].includes(p.type));
   original.push({ kind: 'path', type: 'road', points: api.HARBOR_MAIN_STREET_POINTS },
     { kind: 'path', type: 'road', points: api.HARBOR_HARBOR_AXIS_POINTS });
-  const result = audit(original);
+  const legacyColliders = colliders.map((p) => p.label === 'rodi'
+    ? { ...p, dir: new THREE.Vector3(0, 0.96, 0.28).normalize() } : p);
+  const result = audit(original, () => false, legacyColliders);
   assert.equal(result.pass, false);
   assert.ok(result.issues.some((p) => p.obstacle === 'opsBeacon'));
   assert.ok(result.issues.some((p) => p.obstacle === 'rodi'));
@@ -50,10 +52,10 @@ test('new road clearance gate detects the formerly blocked intersection and Rodi
 test('all default road centers and walkable shoulders clear the prop colliders', () => {
   const result = audit(api.DEFAULT_LAYOUT);
   assert.equal(result.pass, true);
-  assert.equal(result.paths, 10);
+  assert.equal(result.paths, 12);
   assert.ok(result.samples > 1500);
   assert.equal(result.blockedSamples, 0);
-  assert.equal(result.segments.filter((s) => s.closed).length, 1);
+  assert.equal(result.segments.filter((s) => s.closed).length, 2);
 });
 
 test('water on a road fails the gate even when every collider is clear', () => {
@@ -66,7 +68,7 @@ test('water on a road fails the gate even when every collider is clear', () => {
 test('the mainland road graph stays connected while the lighthouse remains boat-accessed', () => {
   const all = paths(api.DEFAULT_LAYOUT).map((p) => api.splineDirs(p.data.dirs, { step: 0.012 }).dirs);
   const main = all.filter((dirs) => dirs.some((d) => d.y > 0));
-  assert.equal(all.length - main.length, 1);
+  assert.equal(all.length - main.length, 3);
   const connected = new Set([0]);
   for (let round = 0; round < main.length; round++) {
     for (const i of connected) for (let j = 0; j < main.length; j++) {

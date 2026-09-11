@@ -42,7 +42,7 @@ test('window surrounds leave clear panes on all five windows and batch their tri
 });
 
 test('detailed doors retain the exact door size and creased roofs remain one mesh', () => {
-  for (const [width, height] of [[0.82, 1.78], [0.62, 1.18]]) {
+  for (const [width, height] of [[0.82, 2.15], [0.80, 1.70]]) {
     const door = makePaperDoor(materialFactory, { width, height, color: 0x52646b });
     door.geometry.computeBoundingBox();
     const size = door.geometry.boundingBox.getSize(new THREE.Vector3());
@@ -63,6 +63,7 @@ test('cottage shell has real window cutouts and an open doorway within the exist
   const cast = (x, y) => new THREE.Raycaster(new THREE.Vector3(x, y, 5), new THREE.Vector3(0, 0, -1)).intersectObject(mesh);
   assert.ok(cast(1.12, 1.45).every((hit) => hit.point.z < 0), 'front window must be a hole, not a painted rectangle');
   assert.ok(cast(0, 0.9).every((hit) => hit.point.z < 0), 'doorway stays open through every card layer');
+  assert.ok(cast(0, 2.12).every((hit) => hit.point.z < 0), 'the enlarged door must not be painted over a wall');
   assert.ok(cast(1.12, 2.1).some((hit) => hit.point.z > 1.5), 'wall above the window is solid');
   mesh.geometry.computeBoundingBox();
   const bounds = mesh.geometry.boundingBox;

@@ -18,7 +18,7 @@ vm.runInContext([
   source.slice(source.indexOf('const MAP_CENTER ='), source.indexOf('const DEFAULT_PLAYER_SPAWN_DIR =')),
   source.slice(source.indexOf('const AGENT_DISTRICT_ANCHORS ='), source.indexOf('const DASHBOARD_VIEW_DIR =')),
   source.slice(source.indexOf('function sphericalRing('), source.indexOf('// Home driveways are terrain')),
-  'this.api = { migratePaperNeighborhoods, spreadWorldNeighborhoods, migrateRoadJunctions, mapDir, canonicalMapYaw, DEFAULT_LAYOUT, HARBOR_MAIN_STREET_POINTS, HARBOR_HARBOR_AXIS_POINTS };',
+  'this.api = { migratePaperNeighborhoods, spreadWorldNeighborhoods, migrateRoadJunctions, mapDir, canonicalMapYaw, DEFAULT_LAYOUT, WORLD_DISTRICT_LAYOUT, HARBOR_MAIN_STREET_POINTS, HARBOR_HARBOR_AXIS_POINTS };',
 ].join('\n'), context);
 const { migratePaperNeighborhoods: migrate, mapDir, canonicalMapYaw, DEFAULT_LAYOUT } = context.api;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -58,7 +58,7 @@ test('road migration preserves custom roads, moved cores and moved homes', () =>
   }
 });
 
-test('world homes occupy both hemispheres with at least six units between homes', () => {
+test('village homes keep at least 3.4 units separation and retain rear destinations', () => {
   const homes = DEFAULT_LAYOUT.filter((p) => p.ownerKey);
   assert.equal(homes.length, 6);
   const front = mapDir(0, 0);
@@ -66,7 +66,7 @@ test('world homes occupy both hemispheres with at least six units between homes'
   const positions = homes.map((h) => new THREE.Vector3(...h.n).normalize());
   for (let i = 0; i < positions.length; i++) {
     for (let j = i + 1; j < positions.length; j++) {
-      assert.ok(positions[i].angleTo(positions[j]) * 7.47 >= 6,
+      assert.ok(positions[i].angleTo(positions[j]) * 7.47 >= 3.4,
         `${homes[i].ownerKey}/${homes[j].ownerKey}`);
     }
   }
@@ -81,7 +81,11 @@ test('global redistribution moves owned homes once and keeps appearance and cust
   assert.equal(result[0].wall, 0xabcdef);
   assert.deepEqual(plain(result[1]), before[1]);
   assert.deepEqual(plain(context.api.spreadWorldNeighborhoods(result)), plain(result));
-  assert.deepEqual(plain(context.api.spreadWorldNeighborhoods(DEFAULT_LAYOUT)), plain(DEFAULT_LAYOUT));
+  // Exercise the historic migration on its own default sites, before v110
+  // intentionally moves Rodi closer to the civic plaza.
+  const legacy = context.api.WORLD_DISTRICT_LAYOUT.map((p) => p.ownerKey === 'rodi'
+    ? { ...p, n: [0, 0.96, 0.28], yaw: Math.PI } : p);
+  assert.deepEqual(plain(context.api.spreadWorldNeighborhoods(legacy)), plain(legacy));
 });
 
 test('the retired shoreline tree is removed without removing relocated trees', () => {

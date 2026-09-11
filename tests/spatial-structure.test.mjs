@@ -206,3 +206,36 @@ test('marker failure cannot diverge the rendered composition from its saved layo
   assert.deepEqual(plain(local.migrateSavedComposition(result, JSON.stringify(result))), result);
   assert.equal(JSON.parse(data.get('backup')).length, 1);
 });
+
+test('rose clearing expands away from Rodi while preserving custom paths and homes', () => {
+  const before = plain(context.migrateVillageComposition(context.migrateSpatialStructure(plain(context.before))));
+  const result = plain(context.migrateRoseClearing(before));
+  const garden = result.find((p) => p.id === 'rose.quiet-garden');
+  assert.equal(garden.n.length, 7);
+  assert.ok(Math.min(...garden.n.map((n) => n[0])) < -0.25);
+  const rodi = result.find((p) => p.ownerKey === 'rodi');
+  assert.ok(garden.n.every((n) => new THREE.Vector3(...n).angleTo(new THREE.Vector3(...rodi.n)) > 0.16));
+  for (const home of before.filter((p) => p.ownerKey)) assert.deepEqual(result.find((p) => p.ownerKey === home.ownerKey), home);
+  assert.deepEqual(plain(context.migrateRoseClearing(result)), result);
+  const custom = structuredClone(before);
+  custom.find((p) => p.id === 'rose.quiet-garden').n[0] = [0.3, 0.9, 0.1];
+  assert.deepEqual(plain(context.migrateRoseClearing(custom)), custom);
+});
+
+test('rose upgrade has its own marker and backs up the already migrated village', () => {
+  const before = plain(context.migrateVillageComposition(context.migrateSpatialStructure(plain(context.before))));
+  const data = new Map([['HandulPlanet_composition_v106', '1']]);
+  const writes = [];
+  const local = vm.createContext({ console: { warn() {} },
+    LAYOUT_KEY: 'layout', LAYOUT_BACKUP_KEY: 'backup', LAYOUT_SCHEMA_VERSION: 1,
+    localStorage: { getItem: (k) => data.get(k) ?? null, setItem(k, v) { writes.push(k); data.set(k, v); } },
+  });
+  vm.runInContext(fn('migrateSavedComposition'), local);
+  const result = plain(local.migrateSavedComposition(before, JSON.stringify(before), '107', context.migrateRoseClearing));
+  assert.deepEqual(writes, ['backup', 'layout', 'HandulPlanet_composition_v107']);
+  assert.deepEqual(JSON.parse(data.get('backup'))[0].layout, before);
+  assert.equal(JSON.parse(data.get('backup'))[0].reason, 'before-composition-v107');
+  assert.deepEqual(JSON.parse(data.get('layout')), result);
+  assert.deepEqual(plain(local.migrateSavedComposition(result, JSON.stringify(result), '107', context.migrateRoseClearing)), result);
+  assert.equal(writes.length, 3);
+});
