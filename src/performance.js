@@ -4,6 +4,7 @@ const QUALITY_PROFILES = Object.freeze({
   high: Object.freeze({
     maxPixelRatio: 1.6,
     bloomStrength: 0.10,
+    bloomScale: 1,
     shadowMapSize: 1536,
     shadowFps: 60,
     rainSegments: 460,
@@ -11,13 +12,15 @@ const QUALITY_PROFILES = Object.freeze({
   balanced: Object.freeze({
     maxPixelRatio: 1.35,
     bloomStrength: 0.08,
+    bloomScale: 0.65,
     shadowMapSize: 1024,
     shadowFps: 30,
     rainSegments: 380,
   }),
   performance: Object.freeze({
     maxPixelRatio: 1,
-    bloomStrength: 0.06,
+    bloomStrength: 0,
+    bloomScale: 0,
     shadowMapSize: 1024,
     shadowFps: 20,
     rainSegments: 300,
@@ -27,7 +30,7 @@ const QUALITY_PROFILES = Object.freeze({
 function normalizeTier(value) {
   const tier = String(value || '').toLowerCase();
   if (tier === 'low') return 'performance';
-  return QUALITY_PROFILES[tier] ? tier : '';
+  return Object.hasOwn(QUALITY_PROFILES, tier) ? tier : '';
 }
 
 function chooseInitialTier(nativePixelRatio) {
@@ -36,7 +39,9 @@ function chooseInitialTier(nativePixelRatio) {
   const retinaLaptop = nativePixelRatio > 1.45 && (!cores || cores <= 8);
   const compactRetina = nativePixelRatio > 1.45 && innerWidth <= 900;
   const lowMemory = memory > 0 && memory <= 4;
-  return retinaLaptop || compactRetina || lowMemory ? 'balanced' : 'high';
+  const touchFirst = window.matchMedia?.('(pointer: coarse)').matches === true;
+  if (touchFirst && ((memory > 0 && memory <= 2) || (cores > 0 && cores <= 4))) return 'performance';
+  return touchFirst || retinaLaptop || compactRetina || lowMemory ? 'balanced' : 'high';
 }
 
 /**
@@ -78,6 +83,14 @@ export function createPerformanceGovernor({
     return QUALITY_PROFILES[tier];
   }
 
+  // Composer resizes every pass, even disabled ones. Keep the five bloom mips
+  // tiny in performance mode and restore their resolution when quality recovers.
+  const setBloomSize = bloom.setSize.bind(bloom);
+  bloom.setSize = (width, height) => {
+    const scale = currentProfile().bloomScale;
+    setBloomSize(Math.max(32, Math.round(width * scale)), Math.max(32, Math.round(height * scale)));
+  };
+
   function syncSkyProfile() {
     const profile = currentProfile();
     skySystem?.setPerformanceProfile?.({
@@ -94,9 +107,11 @@ export function createPerformanceGovernor({
     const profile = currentProfile();
     effectivePixelRatio = Math.min(nativePixelRatio, profile.maxPixelRatio);
 
+    bloom.enabled = profile.bloomScale > 0;
+    bloom.strength = profile.bloomStrength;
+
     renderer.setPixelRatio(effectivePixelRatio);
     composer.setPixelRatio(effectivePixelRatio);
-    bloom.strength = profile.bloomStrength;
 
     renderer.shadowMap.autoUpdate = profile.shadowFps >= 55;
     renderer.shadowMap.needsUpdate = true;
@@ -117,20 +132,23 @@ export function createPerformanceGovernor({
     }
     const rawFrameMs = now - lastFrameAt;
     lastFrameAt = now;
-    if (document.hidden || rawFrameMs <= 0 || rawFrameMs > 120) {
+    if (document.hidden || rawFrameMs <= 0 || rawFrameMs > 1000) {
       slowBudget = 0;
       fastBudget = 0;
       return;
     }
 
-    frameMs += (rawFrameMs - frameMs) * 0.055;
+    // Sustained sub-8-FPS rendering must still trigger a quality reduction.
+    // Only long suspension/debugger gaps are excluded from the sample.
+    const boundedFrameMs = Math.min(rawFrameMs, 120);
+    frameMs += (boundedFrameMs - frameMs) * 0.055;
     jankRate += ((rawFrameMs > 24 ? 1 : 0) - jankRate) * 0.045;
     sampleCount++;
     if (locked || sampleCount < 45 || now - lastTierChangeAt < 5000) return;
 
     const runningSlow = frameMs > 20.5 || jankRate > 0.20;
     if (runningSlow) {
-      slowBudget += rawFrameMs;
+      slowBudget += boundedFrameMs;
       fastBudget = 0;
     } else {
       slowBudget = Math.max(0, slowBudget - rawFrameMs * 1.5);
@@ -199,6 +217,8 @@ export function createPerformanceGovernor({
       shadowMapSize: profile.shadowMapSize,
       shadowFps: profile.shadowFps,
       bloomStrength: profile.bloomStrength,
+      bloomEnabled: bloom.enabled,
+      bloomScale: profile.bloomScale,
       rainSegments: profile.rainSegments,
       drawCalls: render.calls || 0,
       triangles: render.triangles || 0,

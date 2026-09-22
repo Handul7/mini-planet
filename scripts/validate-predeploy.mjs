@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { auditSignatureRoster } from '../src/agent-signatures.js';
+import { serviceUrl } from '../src/service-catalog.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
@@ -348,7 +349,9 @@ for (const relative of threeVendorFiles) {
     errors.push(`Three.js vendor 파일 없음: ${relative}`);
     continue;
   }
-  if (relative.endsWith('.js') && !sw.includes(`'./${relative}'`)) {
+  const onDemand = relative.endsWith('/loaders/GLTFLoader.js')
+    && main.includes(`import('../${relative}')`);
+  if (relative.endsWith('.js') && !onDemand && !sw.includes(`'./${relative}'`)) {
     errors.push(`sw.js SHELL에 빠진 Three.js 파일: ./${relative}`);
   }
 }
@@ -451,17 +454,18 @@ walkPublicFields(agentsConfig, (key, _value, path) => {
 });
 
 for (const [key, service] of Object.entries(servicesConfig?.services || {})) {
-  if (!service?.url) continue;
-  try {
-    const url = new URL(service.url);
-    if (url.protocol !== 'https:') errors.push(`config/services.json: ${key}.url은 공개 HTTPS 주소여야 합니다`);
-    if (url.username || url.password) errors.push(`config/services.json: ${key}.url에 인증 정보가 포함됐습니다`);
-  } catch (_) {
-    errors.push(`config/services.json: ${key}.url 형식이 올바르지 않습니다`);
+  for (const field of ['url', 'repository']) {
+    if (service?.[field] && !serviceUrl(service[field])) {
+      errors.push(`config/services.json: ${key}.${field}은 인증 정보 없는 공개 HTTPS 도메인이어야 합니다`);
+    }
   }
+  if (service?.features && (!Array.isArray(service.features) || service.features.length > 4
+    || service.features.some(value => typeof value !== 'string' || value.length > 100))) errors.push(`config/services.json: ${key}.features 형식 오류`);
+  if (service?.availability && !['public', 'current', 'source', 'prototype'].includes(service.availability)) errors.push(`config/services.json: ${key}.availability 형식 오류`);
 }
 
-const appJsFiles = ['src/boot.js', 'src/main.js', 'src/status-source.js', 'src/public-dashboard.js', 'src/release-quality.js', 'src/sky.js', 'src/ambient-audio.js', 'src/performance.js', 'src/agent-activity.js', 'src/agent-results.js', 'src/agent-signatures.js', 'src/input-controls.js', 'src/paper-style.js', 'src/world/harbor-kit.js', 'assets/papercut/contours.js'];
+const appJsFiles = ['src/boot.js', 'src/main.js', 'src/status-source.js', 'src/public-dashboard.js', 'src/release-quality.js', 'src/sky.js', 'src/climate-model.js', 'src/weather-store.js', 'src/climate-controls.js', 'src/snow.js', 'src/seasonal-surfaces.js', 'src/ambient-audio.js', 'src/performance.js', 'src/agent-activity.js', 'src/agent-results.js', 'src/agent-signatures.js', 'src/input-controls.js', 'src/paper-style.js', 'src/world/harbor-kit.js', 'src/world/island-places.js', 'src/world/paper-assets.js', 'assets/papercut/contours.js'];
+appJsFiles.push('src/agent-separation.js', 'src/world/public-spaces.js');
 for (const file of appJsFiles) {
   if (/from\s+['"]three(?:\/[^'"]*)?['"]/.test(read(file))) {
     errors.push(`${file}: import map이 필요한 bare Three.js import가 남아 있습니다`);

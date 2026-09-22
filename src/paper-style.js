@@ -1,4 +1,5 @@
 import * as THREE from '../vendor/three/build/three.module.min.js';
+import { prepareSeasonalFoliage } from './seasonal-surfaces.js?v=114';
 import { mergeGeometries } from '../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PAPER_CONTOURS } from '../assets/papercut/contours.js?v=97';
 
@@ -109,6 +110,7 @@ export function makePaperCanopy(materialFactory, { pine = false, color = 0x76ad8
   sheet.castShadow = true;
   // Interlocking sheets retain colored relief without noisy self-shadow bands.
   sheet.receiveShadow = false;
+  prepareSeasonalFoliage(sheet, { evergreen: pine });
   group.add(sheet);
   group.userData.paperLayers = 3;
   group.userData.sheetsPerPlane = 5;

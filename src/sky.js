@@ -1,4 +1,9 @@
 import * as THREE from '../vendor/three/build/three.module.min.js';
+import { CITIES, WEATHER_PRESETS, weatherFactors, localClock, seoulSeason, solarState, selectClimateCity } from './climate-model.js?v=114';
+import { createWeatherStore } from './weather-store.js?v=114';
+import { createClimateControls } from './climate-controls.js?v=114';
+import { createSnow } from './snow.js?v=114';
+import { SEASON_SURFACES, setSurfaceSeason } from './seasonal-surfaces.js?v=114';
 
 /**
  * Owns every atmospheric concern: sky dome, stars, clouds, rain, lighting,
@@ -14,6 +19,7 @@ export function createSkySystem({
   radius,
   devTimeShiftMs = 0,
   devWeatherPreset = '',
+  devSeasonPreset = '',
   weatherElements = {},
 }) {
   const { icon: iconEl, temp: tempEl, time: timeEl } = weatherElements;
@@ -23,6 +29,8 @@ export function createSkySystem({
   const stars = createStars(scene);
   const clouds = createClouds(scene, radius);
   const rain = createRain(scene, radius);
+  const snow = createSnow(scene, radius);
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const { hemi, sun } = createLights(scene, radius);
   let performanceTier = 'high';
   const sunDir = sun.position.clone().normalize();
@@ -32,139 +40,92 @@ export function createSkySystem({
   const celestialScreenUp = new THREE.Vector3();
   const celestialScreenDirection = new THREE.Vector3();
 
-  const CITIES = {
-    seoul: {
-      name: 'SEOUL',
-      lat: 37.5665,
-      lon: 126.9780,
-      fallbackOffsetSeconds: 9 * 3600,
-    },
-    rio: {
-      name: 'RIO DE JANEIRO',
-      lat: -22.9068,
-      lon: -43.1729,
-      fallbackOffsetSeconds: -3 * 3600,
-    },
-  };
-  const WEATHER_PRESETS = {
-    clear: { precip: 0, cloud: 0.02, wind: 0.14, kind: 'clear' },
-    cloudy: { precip: 0, cloud: 0.72, wind: 0.32, kind: 'cloudy' },
-    rain: { precip: 0.62, cloud: 0.86, wind: 0.52, kind: 'rain' },
-    storm: { precip: 1, cloud: 1, wind: 0.92, kind: 'storm' },
-  };
-  const weatherPreset = WEATHER_PRESETS[devWeatherPreset] ? devWeatherPreset : '';
-  const weather = { seoul: null, rio: null, active: 'seoul' };
+  let weatherPreset = Object.hasOwn(WEATHER_PRESETS, devWeatherPreset) ? devWeatherPreset : '';
+  let seasonPreset = Object.hasOwn(SEASON_SURFACES, devSeasonPreset) ? devSeasonPreset : '';
+  const weather = { active: 'seoul' };
+  let storage;
+  try { storage = localStorage; } catch { /* Private browsing may deny storage. */ }
+  const weatherStore = createWeatherStore({ storage });
   const weatherVisual = weatherPreset
     ? { ...WEATHER_PRESETS[weatherPreset] }
-    : { precip: 0, cloud: 0.3, wind: 0.2, kind: 'clear' };
-  const lastPlayerDirection = new THREE.Vector3(0, 1, 0);
+    : { ...WEATHER_PRESETS.clear };
+  let weatherTarget = { ...weatherVisual };
+  const lastPlayerDirection = new THREE.Vector3(0, 0.5774647206268071, 0.8164156395068652);
+  const viewArray = [0, 0, 0];
+  const now = () => Date.now() + (Number.isFinite(devTimeShiftMs) ? devTimeShiftMs : 0);
+  let solar = solarState(now(), lastPlayerDirection.toArray(viewArray));
+  let season = seasonPreset || seoulSeason(now());
+  let groundMaterial = null;
+  let lastModelTick = -Infinity;
+  let lastFetchAt = -Infinity;
+  const climateStatus = document.getElementById('climateStatus');
   let lastPanelKey = null;
   let lastPanelTick = 0;
 
   const palette = createDayNightPalette(theme);
   // Use the fallback city offset immediately. Starting every visit at noon
   // made a fast night-time entrance linger in lavender twilight for seconds.
-  let visibleDayFactor = dayFactorFromHour(cityHour(weather.active));
+  let visibleDayFactor = solar.day;
   let weatherGrade = 0;
 
-  async function fetchCity(key) {
-    const city = CITIES[key];
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}`
-      + '&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,precipitation,cloud_cover'
-      + '&timezone=auto';
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`weather ${key} ${response.status}`);
-    const data = await response.json();
-    return { ...data.current, utc_offset_seconds: data.utc_offset_seconds };
-  }
-
-  async function loadWeather() {
-    const [seoul, rio] = await Promise.allSettled([fetchCity('seoul'), fetchCity('rio')]);
-    if (seoul.status === 'fulfilled') weather.seoul = seoul.value;
-    if (rio.status === 'fulfilled') weather.rio = rio.value;
-    if (seoul.status === 'rejected' && rio.status === 'rejected' && tempEl) {
-      tempEl.textContent = '--°';
+  function updateClimate(elapsed) {
+    // Reuse the existing visible-frame loop: no hidden-tab polling interval.
+    if (!document.hidden && !weatherPreset && Date.now() - lastFetchAt >= 600000) {
+      lastFetchAt = Date.now();
+      void weatherStore.refresh();
+    }
+    if (elapsed - lastModelTick < 0.2) return;
+    lastModelTick = elapsed;
+    const timestamp = now();
+    weather.active = selectClimateCity(lastPlayerDirection, weather.active);
+    weatherTarget = activeWeatherFactors();
+    solar = solarState(timestamp, lastPlayerDirection.toArray(viewArray));
+    sunDir.fromArray(solar.sunDirection);
+    sun.position.copy(sunDir).multiplyScalar(54);
+    celestial.sunDirection.copy(sunDir);
+    celestial.moonDirection.copy(sunDir).negate();
+    const nextSeason = seasonPreset || seoulSeason(timestamp);
+    if (nextSeason !== season) {
+      season = nextSeason;
+      setSurfaceSeason(season, groundMaterial);
     }
   }
-  loadWeather();
-  setInterval(loadWeather, 10 * 60 * 1000);
 
-  function cityHour(key) {
-    const offset = weather[key]
-      ? weather[key].utc_offset_seconds
-      : CITIES[key].fallbackOffsetSeconds;
-    const local = new Date(Date.now() + devTimeShiftMs + offset * 1000);
-    return local.getUTCHours() + local.getUTCMinutes() / 60 + local.getUTCSeconds() / 3600;
-  }
-
-  function cityTimeString(current) {
-    if (!current) return '--:--';
-    const local = new Date(Date.now() + devTimeShiftMs + current.utc_offset_seconds * 1000);
-    const pad = number => String(number).padStart(2, '0');
-    return `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`;
-  }
-
-  function updateWeatherPanel(now) {
-    const current = weather[weather.active];
-    if (now - lastPanelTick > 20) {
-      if (timeEl) timeEl.textContent = cityTimeString(current);
-      lastPanelTick = now;
-    }
-    const night = dayFactorFromHour(cityHour(weather.active)) < 0.15;
-    const stamp = weather.active + '|'
-      + (current ? current.time + current.weather_code + current.temperature_2m : 'x')
-      + `|${night}`;
+  function updateWeatherPanel(elapsed) {
+    if (elapsed - lastPanelTick < 0.5 && lastPanelKey !== null) return;
+    lastPanelTick = elapsed;
+    const entry = weatherStore.get(weather.active);
+    const current = entry.current;
+    const clock = localClock(now(), weather.active);
+    const night = solar.day < 0.15;
+    const stamp = [weather.active, current?.time, current?.weather_code, current?.temperature_2m,
+      entry.source, weatherPreset, season, night, clock.time, seasonPreset].join('|');
     if (stamp === lastPanelKey) return;
     lastPanelKey = stamp;
-    if (weatherPreset && iconEl) {
-      iconEl.textContent = ({
-        clear: night ? '🌙' : '☀️',
-        cloudy: '☁️',
-        rain: '🌧️',
-        storm: '⛈️',
-      })[weatherPreset];
+    const presetCode = { clear: 0, cloudy: 3, rain: 63, snow: 73, storm: 95 };
+    const [icon, description] = weatherCode(weatherPreset ? presetCode[weatherPreset] : (current?.weather_code ?? 0), night);
+    if (iconEl) iconEl.textContent = !weatherPreset && !current ? '·' : icon;
+    if (tempEl) tempEl.textContent = !weatherPreset && current ? Math.round(current.temperature_2m) + '°' : '--°';
+    if (timeEl) {
+      timeEl.textContent = clock.time;
+      timeEl.title = `${CITIES[weather.active].name} 기준 시각`;
     }
-    if (!current) return;
-    const [icon] = weatherCode(current.weather_code, night);
-    if (iconEl && !weatherPreset) iconEl.textContent = icon;
-    if (tempEl) tempEl.textContent = Math.round(current.temperature_2m) + '°';
-    if (timeEl) timeEl.textContent = cityTimeString(current);
+    const source = weatherPreset ? '연출 날씨' : entry.source === 'live' ? '실제 날씨'
+      : entry.source === 'cached' ? '최근 저장 날씨' : '날씨 연결 대기 · 기본 하늘';
+    const locationLabel = weather.active === 'seoul' ? '서울' : '반대편 · 리우 기준';
+    const temperature = !weatherPreset && current ? ` · ${Math.round(current.temperature_2m)}°C` : '';
+    const status = `${locationLabel}${temperature} · ${source}\n${SEASON_SURFACES[season].label} · ${seasonPreset ? '선택한 계절' : '서울 달력 기준'}`;
+    if (climateStatus) climateStatus.textContent = status;
+    const toggle = document.getElementById('climateToggle');
+    if (toggle) toggle.title = `${status}\n${weatherPreset || current ? description : '날씨 정보 없음'}`;
   }
 
   function activeWeatherFactors() {
-    if (weatherPreset) return WEATHER_PRESETS[weatherPreset];
-    const current = weather[weather.active];
-    if (!current) return { precip: 0, cloud: 0.3, wind: 0.2, kind: 'clear' };
-    const precip = Math.max(0, Number(current.precipitation) || 0);
-    const cloud = Math.max(0, Number(current.cloud_cover) || 0);
-    const wind = Math.max(0, Number(current.wind_speed_10m) || 0);
-    const kind = weatherKind(current.weather_code);
-    const measuredPrecip = Math.min(1, precip / 4);
-    // Open-Meteo can report a rainy WMO code between measurement ticks with
-    // near-zero instantaneous precipitation. Keep light rain legible, while
-    // ensuring snow and fog never reuse the rain streak system.
-    const visiblePrecip = kind === 'storm'
-      ? Math.max(0.62, measuredPrecip)
-      : kind === 'rain'
-        ? Math.max(0.16, measuredPrecip)
-        : 0;
-    const cloudFloor = {
-      cloudy: 0.58,
-      fog: 0.78,
-      rain: 0.68,
-      snow: 0.72,
-      storm: 0.88,
-    }[kind] || 0;
-    return {
-      precip: visiblePrecip,
-      cloud: Math.max(cloudFloor, Math.min(1, cloud / 100)),
-      wind: Math.min(1, wind / 32),
-      kind,
-    };
+    return weatherPreset ? WEATHER_PRESETS[weatherPreset] : weatherFactors(weatherStore.get(weather.active).current);
   }
 
   function updateDayNight(dt) {
-    const target = dayFactorFromHour(cityHour(weather.active));
+    const target = solar.day;
     visibleDayFactor += (target - visibleDayFactor) * Math.min(1, dt * 0.8);
     const day = visibleDayFactor;
     const twilight = Math.sin(Math.PI * day);
@@ -239,8 +200,9 @@ export function createSkySystem({
   }
 
   function updateWeatherVisuals(dt, elapsed, playerDirection = lastPlayerDirection) {
-    const factors = activeWeatherFactors();
+    const factors = weatherTarget;
     weatherVisual.precip += (factors.precip - weatherVisual.precip) * Math.min(1, dt * 1.5);
+    weatherVisual.snow += (factors.snow - weatherVisual.snow) * Math.min(1, dt * 1.1);
     weatherVisual.cloud += (factors.cloud - weatherVisual.cloud) * Math.min(1, dt * 1.5);
     weatherVisual.wind += (factors.wind - weatherVisual.wind) * Math.min(1, dt * 0.75);
     weatherVisual.kind = factors.kind || weatherVisual.kind;
@@ -294,12 +256,11 @@ export function createSkySystem({
     celestial.polaris.scale.setScalar(1.02 * polarisTwinkle);
     celestial.polarisHalo.scale.setScalar(4.4 * (0.97 + Math.sin(elapsed * 0.82) * 0.03));
 
-    const rainAllowed = weatherVisual.kind === 'rain' || weatherVisual.kind === 'storm';
-    const rainStrength = rainAllowed && weatherVisual.precip > 0.02
+    const rainStrength = !reducedMotion.matches && weatherVisual.precip > 0.002
       ? Math.min(
         0.72,
         0.22 + Math.sqrt(weatherVisual.precip) * 0.42 + (1 - visibleDayFactor) * 0.05,
-      )
+      ) * THREE.MathUtils.smoothstep(weatherVisual.precip, 0, 0.16)
       : 0;
     rain.material.color.copy(rain.colors.day)
       .lerp(rain.colors.night, 1 - visibleDayFactor);
@@ -308,6 +269,9 @@ export function createSkySystem({
     if (rain.lines.visible) {
       rain.step(dt, weatherVisual.wind, playerDirection);
     }
+    snow.material.opacity = reducedMotion.matches ? 0 : weatherVisual.snow * 0.82;
+    snow.points.visible = snow.material.opacity > 0.005;
+    if (snow.points.visible) snow.step(dt, weatherVisual.wind, playerDirection, elapsed);
   }
 
   function updateCelestialAnchors() {
@@ -334,9 +298,9 @@ export function createSkySystem({
     place(celestial.polarisHalo, polarisViewDirection);
   }
 
-  function update({ dt, elapsed, playerDirection }) {
-    lastPlayerDirection.copy(playerDirection).normalize();
-    weather.active = playerDirection.dot(sunDir) >= 0 ? 'seoul' : 'rio';
+  function update({ dt, elapsed, playerDirection, viewDirection = playerDirection }) {
+    lastPlayerDirection.copy(viewDirection).normalize();
+    updateClimate(elapsed);
     updateWeatherPanel(elapsed);
     updateDayNight(dt);
     updateWeatherVisuals(dt, elapsed, lastPlayerDirection);
@@ -344,9 +308,7 @@ export function createSkySystem({
   }
 
   function updateEdit(dt, elapsed = 0) {
-    updateCelestialAnchors();
-    updateDayNight(dt);
-    updateWeatherVisuals(dt, elapsed, lastPlayerDirection);
+    update({ dt, elapsed, viewDirection: camera.position });
   }
 
   function setPerformanceProfile({ tier = 'high', shadowMapSize = 1024, rainSegments = rain.count } = {}) {
@@ -359,14 +321,17 @@ export function createSkySystem({
       renderer.shadowMap.needsUpdate = true;
     }
     rain.setActiveCount(rainSegments);
+    snow.setActiveCount(({ high: 240, balanced: 160, performance: 96 })[performanceTier] || 160);
   }
 
   function dayState() {
-    const hour = cityHour(weather.active);
+    const hour = localClock(now(), weather.active).hour;
     return {
       city: weather.active,
       shiftedHour: +hour.toFixed(3),
-      targetDayFactor: +dayFactorFromHour(hour).toFixed(3),
+      targetDayFactor: +solar.day.toFixed(3),
+      solarElevation: +solar.solarElevation.toFixed(3),
+      sunDirection: solar.sunDirection.map(v => +v.toFixed(4)),
       visibleDayFactor: +visibleDayFactor.toFixed(3),
       twilightFactor: +Math.sin(Math.PI * visibleDayFactor).toFixed(3),
       fogDensity: +scene.fog.density.toFixed(5),
@@ -384,6 +349,9 @@ export function createSkySystem({
       city: weather.active,
       preset: weatherPreset || null,
       kind: weatherVisual.kind,
+      source: weatherPreset ? 'preview' : weatherStore.get(weather.active).source,
+      season,
+      seasonPreset: seasonPreset || null,
       precip: +weatherVisual.precip.toFixed(3),
       cloud: +weatherVisual.cloud.toFixed(3),
       wind: +weatherVisual.wind.toFixed(3),
@@ -395,6 +363,11 @@ export function createSkySystem({
       rainOpacity: +rain.material.opacity.toFixed(3),
       rainSegments: rain.activeCount,
       rainPool: rain.count,
+      snowing: snow.points.visible,
+      snow: +weatherVisual.snow.toFixed(3),
+      snowCount: snow.activeCount,
+      snowPool: snow.count,
+      reducedMotion: reducedMotion.matches,
     };
   }
 
@@ -409,7 +382,22 @@ export function createSkySystem({
     };
   }
 
+  const preferences = createClimateControls({
+    weather: weatherPreset, season: seasonPreset,
+    onChange(next) {
+      weatherPreset = Object.hasOwn(WEATHER_PRESETS, next.weather) ? next.weather : '';
+      seasonPreset = Object.hasOwn(SEASON_SURFACES, next.season) ? next.season : '';
+      lastModelTick = -Infinity;
+      lastPanelKey = null;
+    },
+  });
+  weatherPreset = preferences.weather;
+  seasonPreset = preferences.season;
+  season = seasonPreset || seoulSeason(now());
+  setSurfaceSeason(season);
+
   return {
+    attachGround(material) { groundMaterial = material; setSurfaceSeason(season, material); },
     update,
     updateEdit,
     setPerformanceProfile,
@@ -668,6 +656,7 @@ function createRain(scene, radius) {
     depthWrite: false,
   });
   const lines = new THREE.LineSegments(geometry, material);
+  lines.frustumCulled = false;
   lines.visible = false;
   scene.add(lines);
   let activeCount = count;
@@ -1010,24 +999,6 @@ function createDayNightPalette(theme) {
     nightTint: new THREE.Color(0xbccfff),
     weatherTint: new THREE.Color(0xbcd4e1),
   };
-}
-
-function dayFactorFromHour(hour) {
-  if (hour >= 7 && hour <= 18) return 1;
-  if (hour > 18 && hour < 20) return 1 - (hour - 18) / 2;
-  if (hour > 5 && hour < 7) return (hour - 5) / 2;
-  return 0;
-}
-
-function weatherKind(code) {
-  const value = Number(code);
-  if (value >= 95 && value <= 99) return 'storm';
-  if ((value >= 71 && value <= 77) || value === 85 || value === 86) return 'snow';
-  if ((value >= 51 && value <= 67) || (value >= 80 && value <= 82)) return 'rain';
-  if (value === 45 || value === 48) return 'fog';
-  if (value === 3) return 'cloudy';
-  if (value === 1 || value === 2) return 'partly-cloudy';
-  return 'clear';
 }
 
 function weatherCode(code, night = false) {

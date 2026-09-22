@@ -1,61 +1,113 @@
 {
-  "_설명": "공개용 집 → 서비스 매핑. 공개 HTTPS 주소만 넣고, 로컬 주소·포트·실행 경로는 gitignore된 services.local.json에서 관리합니다.",
+  "_설명": "Handul7의 공개 GitHub 프로젝트를 집별로 안내합니다. 집 배정은 안내 위치이며 실제 에이전트 작업 연동을 뜻하지 않습니다. 개인 연결은 gitignore된 services.local.json에서 관리합니다.",
   "_필드": {
-    "name": "서비스 이름 (패널 제목)",
-    "desc": "한두 문장 설명",
-    "url": "공개 HTTPS 주소. 빈 문자열이면 준비 중",
-    "icon": "이모지 아이콘 1개",
-    "embed": "true면 패널 안에 공개 미리보기를 시도",
-    "note": "방문자에게 공개해도 되는 설명만 작성 (선택)"
+    "name": "프로젝트 이름",
+    "desc": "공개 자료에 근거한 기능 요약",
+    "features": "주요 기능 최대 4개",
+    "url": "확인한 공개 HTTPS 실행 주소. 없으면 빈 문자열",
+    "repository": "공개 GitHub 저장소 주소",
+    "availability": "public: 공개 웹, current: 현재 서비스, source: 소스 공개, prototype: 프로토타입",
+    "checkedAt": "공개 자료 확인 날짜. 실시간 가동 보증이 아님",
+    "icon": "집 안내 아이콘",
+    "embed": "패널 내부 미리보기 허용 여부",
+    "note": "실행 조건과 한계"
   },
   "services": {
     "rodi": {
-      "name": "헤르메스 관제탑",
-      "desc": "팀 오케스트레이션 현황 — 칸반 작업과 승인 대기를 한눈에 보는 자리입니다.",
-      "url": "",
+      "name": "Mini Planet",
+      "desc": "여섯 에이전트의 상태와 결과 공간을 작은 3D 항구 마을에서 둘러보는 대시보드입니다.",
+      "features": [
+        "에이전트 관제와 결과 공간",
+        "행성 산책, 배 이동, 집 방문",
+        "배치 편집과 마을 게시판"
+      ],
+      "url": "https://handul7.github.io/mini-planet/",
+      "repository": "https://github.com/Handul7/mini-planet",
+      "availability": "current",
       "icon": "🗼",
-      "embed": false,
-      "note": "공개용 읽기 전용 관제 화면이 준비되면 연결됩니다."
+      "note": "지금 보고 있는 서비스입니다. 공개 배포본의 에이전트 상태와 결과는 Hermes 미연결 샘플입니다.",
+      "checkedAt": "2026-09-12",
+      "embed": false
     },
     "jarvis": {
-      "name": "아침 브리핑",
-      "desc": "매일 아침 크론이 만드는 하루 요약 — 일정·날씨·팀 소식 브리핑.",
-      "url": "",
+      "name": "오늘 날씨 검색",
+      "desc": "도시나 지역 이름으로 오늘의 시간별 날씨를 검색하고 기온 그래프와 날씨 표를 확인하는 웹입니다.",
+      "features": [
+        "지역 이름 검색과 위치 좌표 변환",
+        "최저·최고 기온, 강수량, 풍속 요약",
+        "시간별 기온 그래프와 습도·날씨 표"
+      ],
+      "url": "https://weather-service-kappa.vercel.app/",
+      "repository": "https://github.com/Handul7/weather_service",
+      "availability": "public",
       "icon": "📋",
-      "embed": false,
-      "note": "공개용 브리핑 아카이브가 준비되면 연결됩니다."
+      "note": "Open-Meteo 데이터를 사용합니다. 서비스 화면과 서울 검색 결과를 확인했습니다. 예보 조회에는 인터넷 연결이 필요합니다.",
+      "checkedAt": "2026-09-12",
+      "embed": false
     },
     "yul": {
-      "name": "도고리 배구장",
-      "desc": "피카츄 배구 오마주 — 도고리와 한 판 붙는 배구 게임.",
+      "name": "안심드라이브",
+      "desc": "가족이 운전 상태와 안전 귀가 소식을 함께 살펴보는 모바일 서비스의 화면 프로토타입입니다.",
+      "features": [
+        "안심 점수와 위험 운전 요약 화면",
+        "주간 운전 리포트와 가족 대화 제안",
+        "급감속·과속·안전 귀가 알림 타임라인"
+      ],
       "url": "",
-      "icon": "🏐",
-      "embed": false,
-      "note": "개인 네트워크 서비스는 로컬 오버라이드에서만 연결합니다."
+      "repository": "https://github.com/Handul7/TeamJ",
+      "availability": "prototype",
+      "icon": "🚗",
+      "note": "TeamJ 저장소의 정적 화면 시제품입니다. 실제 운전 추적·알림 연동이나 공개 실행 주소는 확인되지 않았습니다.",
+      "checkedAt": "2026-09-12",
+      "embed": false
     },
     "ludwig": {
-      "name": "검증 보고서 서가",
-      "desc": "스킬 검증보고서가 꽂히는 서가 — 게이트를 통과한 기록들.",
-      "url": "",
+      "name": "Hermes Local Lab",
+      "desc": "Mac mini에서 Hermes Agent와 로컬 AI를 활용하기 위한 한국어 도구 선택·설치·운영 가이드입니다.",
+      "features": [
+        "용도별 도구 후보와 개인 설치 목록",
+        "로컬 모델·받아쓰기 도구 비교",
+        "기기 준비, 원격 운영, 저장공간과 용어집"
+      ],
+      "url": "https://handul7.github.io/hermes-local-lab/",
+      "repository": "https://github.com/Handul7/hermes-local-lab",
+      "availability": "public",
       "icon": "📚",
-      "embed": false,
-      "note": "공개 가능한 검증 결과 서가가 준비되면 연결됩니다."
+      "note": "설치 목록은 이용 중인 브라우저에 저장됩니다. 실제 프로그램 설치나 계정 동기화를 수행하지 않는 독립적인 개인 가이드입니다.",
+      "checkedAt": "2026-09-12",
+      "embed": false
     },
     "anne": {
-      "name": "프로필 사진관",
-      "desc": "폰 사진을 사진관 스타일 프로필 사진으로 바꿔주는 로컬 앱.",
+      "name": "KYOBODT 사진관",
+      "desc": "업로드한 사진의 증명사진 적합성을 확인하고 기본 증명사진 형식으로 변환하는 모바일 중심 웹 앱입니다.",
+      "features": [
+        "사진 업로드와 증명사진 적합성 검사",
+        "배경 정리와 얼굴 기준 구도 변환",
+        "OpenAI·로컬 처리·Gemini 혼합 방식 지원"
+      ],
       "url": "",
+      "repository": "https://github.com/Handul7/KYOBODTPROFILE",
+      "availability": "source",
       "icon": "📸",
-      "embed": false,
-      "note": "개인 네트워크 서비스는 로컬 오버라이드에서만 연결합니다."
+      "note": "별도 앱 서버와 AI 설정이 필요합니다. 공개 실행 주소는 확인되지 않았습니다. 사진 처리 위치와 외부 AI 사용 여부는 운영 설정에 따라 달라집니다.",
+      "checkedAt": "2026-09-12",
+      "embed": false
     },
     "argos": {
-      "name": "리서치 위키",
-      "desc": "아르고스가 수집한 지식이 쌓이는 위키 — 출처와 확신도가 함께 기록됩니다.",
+      "name": "Open-Meteo 날씨 실험실",
+      "desc": "위치 검색, 시간별 날씨 조회, 기온 그래프 생성을 구성한 Python·Flask 기반 날씨 웹 프로젝트입니다.",
+      "features": [
+        "Open-Meteo 위치 검색과 시간별 예보 조회",
+        "기온 그래프와 날씨 표 생성",
+        "Flask 실행과 Vercel 배포 구성"
+      ],
       "url": "",
+      "repository": "https://github.com/Handul7/open-meteo-weather-web",
+      "availability": "source",
       "icon": "👁️",
-      "embed": false,
-      "note": "공개 출처가 포함된 리서치 아카이브가 준비되면 연결됩니다."
+      "note": "weather_service와 같은 기능 문서를 가진 관련 저장소입니다. 별도 실행 주소는 확인되지 않았으며, 공개 날씨 화면은 자비스의 '오늘 날씨 검색'에 연결했습니다.",
+      "checkedAt": "2026-09-12",
+      "embed": false
     }
   }
 }

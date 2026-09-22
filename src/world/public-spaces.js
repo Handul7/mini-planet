@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three/build/three.module.min.js';
 import { mergeGeometries } from '../../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
-import { makePaperSlab, makePaperTierRoof } from './paper-assets.js?v=105';
+import { makePaperSlab, makePaperTierRoof } from './paper-assets.js?v=114';
 
 // Fixed furnishings share a vertex-colored batch; the layered roof and deck
 // reuse the same paper construction as the homes without adding textures.

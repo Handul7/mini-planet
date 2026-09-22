@@ -4,15 +4,15 @@ import { RenderPass } from '../vendor/three/examples/jsm/postprocessing/RenderPa
 import { UnrealBloomPass } from '../vendor/three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from '../vendor/three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from '../vendor/three/examples/jsm/postprocessing/OutputPass.js';
-import { GLTFLoader } from '../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from '../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
-import { applyPaperSurface, applyPaperObject, makePaperCanopy, paperCutGeometry } from './paper-style.js?v=97';
-import { makePaperSlab, makePaperHouseShell, makePaperRelief, makePaperTierRoof, makePaperTower, makePaperWindowTrim, makePaperDoor, makePaperRose } from './world/paper-assets.js?v=112';
+import { applyPaperSurface, applyPaperObject, makePaperCanopy, paperCutGeometry } from './paper-style.js?v=114';
+import { makePaperSlab, makePaperHouseShell, makePaperRelief, makePaperTierRoof, makePaperTower, makePaperWindowTrim, makePaperDoor, makePaperRose } from './world/paper-assets.js?v=114';
 import { makeStreetPavers, makePlazaPavers } from './world/village-paving.js?v=112';
-import { makeIslandMooring, makePaperGrove, makeWindLookout } from './world/island-places.js?v=110';
-import { makePaperPublicSpace } from './world/public-spaces.js?v=105';
+import { makeIslandMooring, makePaperGrove, makeWindLookout } from './world/island-places.js?v=114';
+import { makePaperPublicSpace } from './world/public-spaces.js?v=115';
 import { createRoseStory } from './rose-story.js?v=105';
 import { createLandmarkCompass } from './landmark-compass.js?v=108';
+import { renderServiceDetails } from './service-catalog.js?v=113';
 import { createVillageBoard } from './village-board.js?v=102';
 import { createStableSceneTarget, stabilizePaperShadows } from './render-stability.js?v=102';
 import { createVisibilityLoop, createElementSizeCache } from './render-efficiency.js?v=104';
@@ -22,14 +22,16 @@ import {
   makeHedgeLine,
   makeQuayRail,
   makeStreetEdges,
-} from './world/harbor-kit.js?v=110';
+} from './world/harbor-kit.js?v=114';
 import { createAgentStatusSource } from './status-source.js?v=70';
-import { createSkySystem } from './sky.js?v=97';
+import { createSkySystem } from './sky.js?v=114';
+import { prepareSeasonalGround } from './seasonal-surfaces.js?v=114';
 import { createAmbientAudio } from './ambient-audio.js?v=104';
 import { createAgentActivityTools } from './agent-activity.js?v=70';
-import { createPerformanceGovernor } from './performance.js?v=64';
+import { createPerformanceGovernor } from './performance.js?v=119';
+import { createAgentSeparation } from './agent-separation.js?v=115';
 import { signatureForAgent } from './agent-signatures.js?v=72';
-import { readGamepadControls } from './input-controls.js?v=71';
+import { readGamepadControls, createOrbitGesture, bindVirtualJoystick, wheelPixels } from './input-controls.js?v=119';
 import {
   cleanPublicText,
   evaluateSnapshotFreshness,
@@ -145,7 +147,7 @@ let RUNTIME_CONFIG = {
     console.warn('config/services.json 로드 실패 — 집은 서비스 없이 표시됩니다:', servicesResult.reason);
   }
 }
-if (IS_LOCAL_RUNTIME) {
+if (IS_LOCAL_RUNTIME && URL_PARAMS.get('publicPreview') !== '1') {
   try {
     const localServices = await fetchJSON('config/services.local.json');
     SERVICES = { ...SERVICES, ...(localServices.services || {}) };
@@ -256,7 +258,7 @@ const wxTimeEl = document.getElementById('wxTime');
 
 function isUiInteractionTarget(target) {
   return target instanceof Element && !!target.closest(
-    'button, a, input, textarea, select, summary, iframe, [contenteditable="true"], [role="tab"], [role="dialog"], .editor, .inspector, .draw-bar, .paper-panel'
+    'button, a, input, textarea, select, summary, iframe, [contenteditable="true"], [role="tab"], [role="dialog"], .editor, .inspector, .draw-bar, .paper-panel, .climate-panel'
   );
 }
 
@@ -554,6 +556,7 @@ const skySystem = createSkySystem({
   radius: R,
   devTimeShiftMs: DEV_TIME_SHIFT_MS,
   devWeatherPreset: DEV_WEATHER_PRESET,
+  devSeasonPreset: URL_PARAMS.has('dev') ? URL_PARAMS.get('seasonPreset') : '',
   weatherElements: { icon: wxIconEl, temp: wxTempEl, time: wxTimeEl },
 });
 performanceGovernor.attachSkySystem(skySystem);
@@ -592,6 +595,7 @@ const planet = new THREE.Mesh(
 }
 planet.receiveShadow = true;
 applyPaperSurface(planet.material);
+skySystem.attachGround(planet.material);
 scene.add(planet);
 addOutline(planet, 1.012); // thin rim so the globe reads as one big cartoon shape
 
@@ -1107,6 +1111,7 @@ function makeVillageTerrace(rx = 1.05, rz = 0.56, accentColor = 0x879a8b) {
   top.scale.set(rx, 1, rz);
   top.position.y = 0.145;
   top.receiveShadow = true;
+  prepareSeasonalGround(top);
   const identityRim = new THREE.Mesh(
     new THREE.TorusGeometry(0.88, 0.035, 5, 28),
     toonMat(accentColor),
@@ -2849,25 +2854,41 @@ const PROP_CATEGORIES = ['관제', '건물', '항구', '자연', '도로변', '�
 // immediately and the model pops in when the shared prototype resolves, so
 // layouts build synchronously as before.
 // ===========================================================================
-const gltfLoader = new GLTFLoader();
+let gltfLoaderPromise;
 const modelProtoCache = new Map();   // file → Promise<normalized prototype Group>
+
+function getGltfLoader() {
+  if (!gltfLoaderPromise) {
+    gltfLoaderPromise = import('../vendor/three/examples/jsm/loaders/GLTFLoader.js')
+      .then(({ GLTFLoader }) => new GLTFLoader())
+      .catch((error) => { gltfLoaderPromise = null; throw error; });
+  }
+  return gltfLoaderPromise;
+}
 
 // load + normalize once per file: toon-shade every mesh (keeping the pack's
 // texture atlas), stand the model on y=0, center it, and scale it so its
 // fit axis ('y' height or 'max' largest dimension) equals `size` world units.
 function loadModelProto(file, size, fit = 'y') {
   if (!modelProtoCache.has(file)) {
-    modelProtoCache.set(file, gltfLoader.loadAsync(file).then(({ scene }) => {
+    modelProtoCache.set(file, getGltfLoader().then((loader) => loader.loadAsync(file)).then(({ scene }) => {
+      const materials = new Map();
+      function toonMaterial(src) {
+        if (!materials.has(src)) {
+          materials.set(src, new THREE.MeshToonMaterial({
+            color: src?.color || 0xffffff,
+            map: src?.map || null,
+            gradientMap: TOON_GRAD,
+          }));
+        }
+        return materials.get(src);
+      }
       scene.traverse((o) => {
         if (!o.isMesh) return;
-        const src = o.material;
-        o.material = new THREE.MeshToonMaterial({
-          color: src && src.color ? src.color.clone() : new THREE.Color(0xffffff),
-          map: (src && src.map) || null,
-          gradientMap: TOON_GRAD,
-        });
+        o.material = Array.isArray(o.material) ? o.material.map(toonMaterial) : toonMaterial(o.material);
         o.castShadow = true;
       });
+      for (const src of materials.keys()) src?.dispose();
       applyPaperObject(scene);
       const box = new THREE.Box3().setFromObject(scene);
       const dims = box.getSize(new THREE.Vector3());
@@ -2882,7 +2903,7 @@ function loadModelProto(file, size, fit = 'y') {
       const proto = new THREE.Group();
       proto.add(scene);
       return proto;
-    }));
+    }).catch((error) => { modelProtoCache.delete(file); throw error; }));
   }
   return modelProtoCache.get(file);
 }
@@ -3261,6 +3282,7 @@ const PATH_DEFS = {
       const land = makeCapMesh(center, rim, {
         lift: 0.085, material: toonMat(THEME.world.islandGrass),
       });
+      prepareSeasonalGround(land);
       const paperCoast = makeSurfaceRibbon([...rim, rim[0]], {
         width: 0.075, lift: 0.091, material: toonMat(0x6c9b85),
       });
@@ -3449,8 +3471,8 @@ const PATH_DEFS = {
       if (rim.length < 3) return { mesh: new THREE.Group(), zones: [] };
       const center = centroidDir(rim);
       const mesh = new THREE.Group();
-      mesh.add(makeCapMesh(center, rim, { lift: 0.100, grow: 0.012, material: toonMat(0x688c63) }));
-      mesh.add(makeCapMesh(center, rim, { lift: 0.116, material: toonMat(0x7cae76) }));
+      mesh.add(prepareSeasonalGround(makeCapMesh(center, rim, { lift: 0.100, grow: 0.012, material: toonMat(0x688c63) }), { amount: 0.7 }));
+      mesh.add(prepareSeasonalGround(makeCapMesh(center, rim, { lift: 0.116, material: toonMat(0x7cae76) })));
       return { mesh, zones: [] };
     },
   },
@@ -3985,6 +4007,8 @@ function loadSavedLayout() {
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '107', migrateRoseClearing);
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '110', migratePlaceIdentity);
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '111', migrateVillageFrontage);
+    clean = migrateSavedComposition(clean, JSON.stringify(clean), '116', migrateVillageBalance);
+    clean = migrateSavedComposition(clean, JSON.stringify(clean), '117', migrateVillageSimplicity);
     return clean.filter((entry) => !isRetiredOceanTrail(entry));
   } catch (e) { /* corrupt -> fall back to default */ }
   return null;
@@ -4257,7 +4281,6 @@ function sphericalArc(centerValues, radius, from, to, segments = 8) {
   });
 }
 
-const HARBOR_SEA_CENTER = [0, -0.42, 0.91];
 const HARBOR_FRONT_ISLAND_POINTS = [
   [-1.48, 0.72], [-1.52, 0.28], [-1.34, -0.08], [-0.98, -0.31],
   [-0.48, -0.42], [0, -0.45], [0.48, -0.42], [0.98, -0.31],
@@ -4968,7 +4991,121 @@ function migrateVillageFrontage(layout) {
   return result.filter((p) => !retired.has(p));
 }
 
-const DEFAULT_LAYOUT = migrateVillageFrontage(WORLD_DISTRICT_LAYOUT);
+const VILLAGE_BALANCE_BASE = migrateVillageFrontage(WORLD_DISTRICT_LAYOUT);
+
+function migrateVillageBalance(layout) {
+  const result = layout.map((entry) => ({ ...entry }));
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const dir = (p) => p.n ? unit(p.n) : mapDir(p.x, p.z);
+  const yaw = (p) => p.n ? (p.yaw || 0) : canonicalMapYaw(p.x, p.z, p.yaw || 0);
+  const sameProp = (a, b) => a.type === b.type && dir(a).angleTo(dir(b)) < 0.003
+    && Math.abs(wrappedAngle(yaw(a) - yaw(b))) < 0.003
+    && ['scale', 'color', 'wall', 'roof'].every((key) => (a[key] ?? (key === 'scale' ? 1 : null))
+      === (b[key] ?? (key === 'scale' ? 1 : null)));
+  const samePath = (a, b) => {
+    if (a.type !== b.type) return false;
+    const actual = normalizePathDirs(a), expected = normalizePathDirs(b);
+    return actual.length === expected.length && actual.every((n, i) => n.angleTo(expected[i]) < 0.003);
+  };
+  const isBaselinePath = (p) => VILLAGE_BALANCE_BASE.some((base) => base.kind === 'path' && samePath(p, base));
+  const customPathNear = (p, site, clearance) => {
+    if (isBaselinePath(p)) return false;
+    const points = normalizePathDirs(p);
+    if (!points.length) return false;
+    const center = points.reduce((sum, n) => sum.add(n), new THREE.Vector3());
+    if (center.lengthSq() < 1e-8) return true;
+    center.normalize();
+    const radius = Math.max(...points.map((n) => center.angleTo(n)));
+    // A conservative enclosing cap also protects the inside of custom lawns
+    // and long paths whose vertices happen to lie far from the proposed site.
+    return radius >= Math.PI / 2 || center.angleTo(site) <= radius + clearance;
+  };
+  const occupied = (site, excluded, clearance) => result.some((p) => p !== excluded && (p.kind !== 'path'
+    ? dir(p).angleTo(site) < clearance + (p.ownerKey ? 0.24 * (p.scale ?? 1) : 0)
+    : customPathNear(p, site, clearance)));
+
+  // Keep the working harbor's west arrival clear and spread existing planting.
+  const moves = [
+    { type: 'marketStall', site: mapDir(0.60, -0.31), yaw: canonicalMapYaw(0.60, -0.31, -0.02), clearance: 0.25 },
+    { type: 'coastPine', site: unit([-0.74, 0.37, -0.56]), yaw: -0.10, clearance: 0.20 },
+    { type: 'paperGrove', from: unit([-0.13, -0.86, 0.49]), site: unit([0.25, -0.90, -0.36]), yaw: 0.55, clearance: 0.24 },
+  ];
+  for (const move of moves) {
+    const original = VILLAGE_BALANCE_BASE.find((p) => p.type === move.type
+      && (!move.from || dir(p).angleTo(move.from) < 0.003));
+    const prop = original && result.find((p) => p.kind !== 'path' && sameProp(p, original));
+    if (!prop || occupied(move.site, prop, move.clearance)) continue;
+    prop.n = move.site.toArray(); prop.yaw = move.yaw;
+    delete prop.x; delete prop.z;
+  }
+
+  // Two roadside planting pockets, not another ring of repeated buildings.
+  // Existing lanes and neighboring homes must still match the reviewed layout.
+  const pockets = [
+    { id: 'west.walk-garden', site: [-0.92, 0.39, 0.02], anchor: 'jarvis', scale: 0.94, yaw: -0.45 },
+    { id: 'east.walk-garden', site: [0.93, 0.36, -0.08], anchor: 'yul', scale: 1.02, yaw: 0.70 },
+  ];
+  for (const pocket of pockets) {
+    if (result.some((p) => p.id === pocket.id)) continue;
+    const site = unit(pocket.site);
+    const originalHome = VILLAGE_BALANCE_BASE.find((p) => p.ownerKey === pocket.anchor);
+    const home = result.find((p) => p.ownerKey === pocket.anchor);
+    const lane = VILLAGE_BALANCE_BASE.find((p) => p.type === 'lane'
+      && normalizePathDirs(p).some((n) => n.angleTo(site) < 0.42));
+    if (!home || !sameProp(home, originalHome) || !lane
+        || !result.some((p) => p.kind === 'path' && samePath(p, lane))
+        || occupied(site, null, 0.17)) continue;
+    const basis = tangentBasis(site);
+    const outline = [[-0.14, -0.025], [-0.08, -0.10], [0.065, -0.10], [0.145, -0.01],
+      [0.10, 0.11], [0.025, 0.18], [-0.12, 0.11]].map(([x, z]) => site.clone()
+      .addScaledVector(basis.east, x).addScaledVector(basis.north, z).normalize().toArray());
+    result.push({ kind: 'path', type: 'grass', id: pocket.id, districtId: pocket.anchor, n: outline },
+    { type: 'paperGrove', n: site.toArray(), scale: pocket.scale, yaw: pocket.yaw });
+  }
+  return result;
+}
+
+const VILLAGE_BALANCED_LAYOUT = migrateVillageBalance(VILLAGE_BALANCE_BASE);
+
+function migrateVillageSimplicity(layout) {
+  const retired = new Set();
+  const dir = (p) => p.n ? new THREE.Vector3(...p.n).normalize() : mapDir(p.x, p.z);
+  const yaw = (p) => p.n ? (p.yaw || 0) : canonicalMapYaw(p.x, p.z, p.yaw || 0);
+  const geometryKeys = new Set(['n', 'points', 'x', 'z', 'yaw', 'scale']);
+  const matches = (a, b) => {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    if ([...keys].some((key) => !geometryKeys.has(key)
+      && JSON.stringify(a[key]) !== JSON.stringify(b[key]))) return false;
+    if ((a.scale ?? 1) !== (b.scale ?? 1)) return false;
+    if (a.kind === 'path') {
+      const actual = normalizePathDirs(a), expected = normalizePathDirs(b);
+      return actual.length === expected.length
+        && actual.every((n, i) => n.angleTo(expected[i]) < 0.0002);
+    }
+    return dir(a).angleTo(dir(b)) < 0.0002
+      && Math.abs(wrappedAngle(yaw(a) - yaw(b))) < 0.0002;
+  };
+  // Retire only complete, unedited v116 decorations. Modified or ambiguous
+  // pairs belong to the user's composition and must remain intact.
+  for (const [id, site] of [
+    ['west.walk-garden', [-0.92, 0.39, 0.02]],
+    ['east.walk-garden', [0.93, 0.36, -0.08]],
+  ]) {
+    const originalGround = VILLAGE_BALANCED_LAYOUT.find((p) => p.id === id);
+    const center = new THREE.Vector3(...site).normalize();
+    const originalGrove = VILLAGE_BALANCED_LAYOUT.find((p) => p.type === 'paperGrove'
+      && dir(p).angleTo(center) < 0.0002);
+    const grounds = layout.filter((p) => p.id === id);
+    const groves = layout.filter((p) => p.type === 'paperGrove' && dir(p).angleTo(center) < 0.0002);
+    if (grounds.length === 1 && groves.length === 1
+      && matches(grounds[0], originalGround) && matches(groves[0], originalGrove)) {
+      retired.add(grounds[0]); retired.add(groves[0]);
+    }
+  }
+  return layout.filter((p) => !retired.has(p));
+}
+
+const DEFAULT_LAYOUT = migrateVillageSimplicity(VILLAGE_BALANCED_LAYOUT);
 
 // Home driveways are terrain tied to each service-home spot — regenerated
 // whenever the layout changes, so they follow the houses around in edit mode.
@@ -5722,8 +5859,65 @@ function addAgentAccessories(c, visual = {}) {
   const headRig = c.userData.headRig;
   const style = typeof visual.style === 'string' ? visual.style : '';
   c.userData.visualStyle = style;
+  c.userData.designRevision = 'rpg-paper-118';
 
-  const addHairDome = (color, { back = true } = {}) => {
+  const paper = toonMat(0xe8e1cb);
+  const gold = toonMat(0xc7a364);
+  const leather = toonMat(0x6d5546);
+  const cutPanel = (parent, points, material, position, name, depth = 0.025) => {
+    const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y)));
+    const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, steps: 1, curveSegments: 1 });
+    geometry.translate(0, 0, -depth / 2);
+    geometry.clearGroups();
+    const panel = new THREE.Mesh(geometry, material);
+    panel.name = name;
+    panel.position.set(...position);
+    panel.castShadow = true;
+    parent.add(panel);
+    return panel;
+  };
+  // Broad folded panels carry the costume at village scale; tiny embroidery
+  // is deliberately omitted. All pieces stay on the existing animated rig.
+  const coat = (material, { hem = 0.29, bottom = 0.26, trim = gold } = {}) => {
+    for (const side of [-1, 1]) {
+      const outline = [[0.035, 0.80], [0.145, 0.86], [0.205, 0.62],
+        [hem, bottom + 0.02], [0.065, bottom + 0.055]];
+      cutPanel(body, outline.map(([x, y]) => [x * side, y]), material, [0, 0, 0.18], 'coat-front');
+      cutPanel(body, [[0.16, 0.73], [0.18, 0.73], [hem, bottom + 0.02], [hem - 0.025, bottom + 0.02]]
+        .map(([x, y]) => [x * side, y]), material, [0, 0, -0.0025], 'coat-side-fold', 0.365);
+      cutPanel(body, [[0.07, bottom + 0.06], [0.09, bottom + 0.06], [0.062, 0.64], [0.044, 0.65]]
+        .map(([x, y]) => [x * side, y]), trim, [0, 0, 0.198], 'coat-binding', 0.012);
+      cutPanel(body, [[0.025, 0.78], [0.145, 0.855], [0.17, 0.76], [0.065, 0.66]]
+        .map(([x, y]) => [x * side, y]), material, [0, 0, 0.246], 'folded-lapel');
+    }
+    cutPanel(body, [[-0.18, 0.73], [0.18, 0.73], [hem, bottom], [0.04, bottom - 0.025],
+      [0, bottom + 0.11], [-0.04, bottom - 0.025], [-hem, bottom]], material, [0, 0, -0.185], 'split-coat-back');
+  };
+  const cuffs = (material = paper, radius = 0.066) => {
+    for (const arm of [L.armL, L.armR]) {
+      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius + 0.009, 0.070, 8), material);
+      cuff.name = 'folded-cuff';
+      cuff.position.y = -0.235;
+      arm.add(cuff);
+    }
+  };
+  const belt = (material = leather) => {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.218, 0.225, 0.060, 12), material);
+    band.position.y = 0.55;
+    const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.058, 0.026), gold);
+    buckle.position.set(0, 0.55, 0.236);
+    const inset = new THREE.Mesh(new THREE.BoxGeometry(0.040, 0.030, 0.014), material);
+    inset.position.set(0, 0.55, 0.254);
+    body.add(band, buckle, inset);
+  };
+  if (['companion-conductor', 'moonlight-scholar', 'resonance-listener'].includes(style)) {
+    const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.145, 0.27, 0.023), paper);
+    shirt.name = 'costume-shirt';
+    shirt.position.set(0, 0.72, 0.231);
+    body.add(shirt);
+  }
+
+  const addHairDome = (color, { back = true, fringe = true } = {}) => {
     if (!headRig) return null;
     const hairMat = toonMat(color);
     const dome = new THREE.Mesh(
@@ -5733,6 +5927,14 @@ function addAgentAccessories(c, visual = {}) {
     dome.position.y = 0.025;
     dome.castShadow = true;
     headRig.add(dome);
+    if (fringe) {
+      for (const [x, tilt, length] of [[-0.105, -0.30, 0.10], [0, 0.20, 0.12], [0.105, 0.38, 0.09]]) {
+        const lock = cutPanel(headRig, [[-0.065, 0.07], [0.045, 0.075], [0.060, -0.035],
+          [-0.035, -length], [-0.017, -0.045]], hairMat, [x, 0.145, 0.18], 'swept-hair', 0.045);
+        lock.rotation.x = -0.65;
+        lock.rotation.z = tilt;
+      }
+    }
     if (back) {
       const backHair = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.20, 3, 8), hairMat);
       backHair.position.set(0, -0.12, -0.15);
@@ -5744,8 +5946,8 @@ function addAgentAccessories(c, visual = {}) {
 
   const makeTuningFork = ({ repair = true, scale = 1 } = {}) => {
     const fork = new THREE.Group();
-    const silver = toonMat(0xd9dee7);
-    const gold = toonMat(0xf2cf70);
+    const silver = toonMat(style === 'resonance-listener' ? 0xc7a364 : 0xd9dee7);
+    const gold = toonMat(0xc7a364);
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.021, 0.28, 7), silver);
     handle.position.y = -0.04;
     const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.025, 0.025), silver);
@@ -5768,20 +5970,18 @@ function addAgentAccessories(c, visual = {}) {
 
   if (style === 'companion-conductor') {
     // Midnight constellation coat, Polaris pins and gold-mended baton.
-    addHairDome(0x172033);
-    const baton = makeTuningFork({ repair: true, scale: 1.08 });
+    addHairDome(0x27303f, { back: false });
+    const baton = makeTuningFork({ repair: true, scale: 1.20 });
+    baton.name = 'conductor-tuning-fork';
     baton.position.set(0, -0.31, 0.08);
     baton.rotation.x = -0.58;
     baton.rotation.z = -0.10;
     L.armR.add(baton);
-    const coatMat = c.userData.trimMaterial || toonMat(0x151d31);
-    [-0.095, 0.095].forEach((x, index) => {
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.43, 0.05), coatMat);
-      tail.position.set(x, 0.38, -0.10);
-      tail.rotation.z = (index ? -1 : 1) * 0.08;
-      body.add(tail);
-    });
-    const sash = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.43, 0.026), toonMat(0x7f8ca8));
+    const coatMat = toonMat(0x29354d);
+    coat(coatMat);
+    cuffs();
+    belt();
+    const sash = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.36, 0.026), leather);
     sash.position.set(0, 0.70, 0.225);
     sash.rotation.z = -0.42;
     body.add(sash);
@@ -5789,17 +5989,16 @@ function addAgentAccessories(c, visual = {}) {
     polaris.scale.set(0.9, 1.35, 0.7);
     polaris.position.set(-0.105, 0.77, 0.255);
     body.add(polaris);
-    [[-0.06, 0.69], [0.05, 0.62], [0.11, 0.72]].forEach(([x, y]) => {
-      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.018, 0), toonMat(0xb9c5e3));
-      star.position.set(x, y, 0.245);
-      body.add(star);
-    });
+    const backStar = new THREE.Mesh(new THREE.OctahedronGeometry(0.052, 0), gold);
+    backStar.scale.set(1, 1.5, 0.3);
+    backStar.position.set(0, 0.64, -0.21);
+    body.add(backStar);
     c.userData.labelHeight = 1.68;
     c.userData.activityHeight = 1.56;
   } else if (style === 'clockwork-steward') {
     // Human-shaped butler automaton: lunar lenses, chronicle crest and watch.
     const brass = toonMat(0xd1a45f);
-    const glass = new THREE.MeshBasicMaterial({ color: 0x8fcbff });
+    const glass = toonMat(0xb6d8dc);
     const white = toonMat(0xf4f2e8);
     [-0.075, 0.075].forEach(x => {
       const lens = new THREE.Mesh(new THREE.TorusGeometry(0.059, 0.014, 6, 16), brass);
@@ -5811,19 +6010,29 @@ function addAgentAccessories(c, visual = {}) {
     const brow = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.022, 0.018), toonMat(0x72583d));
     brow.position.set(0, 0.105, 0.195);
     headRig?.add(brow);
-
-    [-0.11, 0.11].forEach((x, index) => {
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.05), c.userData.trimMaterial);
-      tail.position.set(x, 0.38, -0.10);
-      tail.rotation.z = (index ? -1 : 1) * 0.07;
-      body.add(tail);
-    });
+    for (const side of [-1, 1]) {
+      const ear = new THREE.Mesh(new THREE.CylinderGeometry(0.070, 0.070, 0.048, 10), brass);
+      ear.name = 'automaton-ear-disc';
+      ear.rotation.z = Math.PI / 2;
+      ear.position.set(side * 0.227, 0.012, -0.025);
+      const inset = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.052, 10), leather);
+      inset.rotation.z = Math.PI / 2;
+      inset.position.copy(ear.position);
+      headRig?.add(ear, inset);
+    }
+    const crownSeam = new THREE.Mesh(new THREE.TorusGeometry(0.224, 0.008, 4, 20, Math.PI), brass);
+    crownSeam.rotation.y = Math.PI / 2;
+    headRig?.add(crownSeam);
+    coat(c.userData.trimMaterial, { hem: 0.25, bottom: 0.28 });
+    cuffs(white);
     const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.24, 0.025), white);
     shirt.position.set(0, 0.70, 0.225);
     const bow = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), toonMat(0x35414d));
     bow.scale.set(1.55, 0.70, 0.55);
     bow.position.set(0, 0.80, 0.25);
     body.add(shirt, bow);
+    cutPanel(body, [[-0.043, 0.795], [0.043, 0.795], [0.065, 0.708], [0, 0.733], [-0.065, 0.708]],
+      white, [0, 0, 0.272], 'butler-cravat');
 
     const crest = new THREE.Group();
     [0.095, 0.068, 0.040].forEach((radius, index) => {
@@ -5845,24 +6054,18 @@ function addAgentAccessories(c, visual = {}) {
     watch.add(watchFace, watchRim);
     watch.position.set(0.20, 0.54, 0.238);
     body.add(watch);
-    for (let index = 0; index < 4; index++) {
-      const link = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.005, 5, 10), brass);
-      link.position.set(0.12 + index * 0.025, 0.69 - index * 0.045, 0.245);
-      body.add(link);
-    }
-    const memoryRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.19, 0.012, 6, 24),
-      new THREE.MeshBasicMaterial({ color: 0x8fcbff, transparent: true, opacity: 0.48 }),
-    );
-    memoryRing.position.set(-0.24, 0.92, -0.02);
-    memoryRing.rotation.set(0.55, 0.25, 0.35);
-    body.add(memoryRing);
+    const chain = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.009, 4, 14, Math.PI), brass);
+    chain.rotation.z = Math.PI;
+    chain.position.set(0.115, 0.68, 0.251);
+    const backDial = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.017, 5, 16), brass);
+    backDial.position.set(0, 0.70, -0.21);
+    body.add(chain, backDial);
     c.userData.labelHeight = 1.72;
     c.userData.activityHeight = 1.58;
   } else if (style === 'moonlight-scholar') {
     // Gray-haired scholar with silver glasses and a locked research book.
-    addHairDome(0x8a8f9b);
-    const glassMat = toonMat(0xc9ced8);
+    addHairDome(0x929391, { back: false });
+    const glassMat = toonMat(0x484c52);
     [-0.07, 0.07].forEach(x => {
       const rim = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.011, 6, 16), glassMat);
       rim.position.set(x, 0.018, 0.218);
@@ -5874,27 +6077,25 @@ function addAgentAccessories(c, visual = {}) {
     const book = new THREE.Group();
     const coverMat = toonMat(0x6f5747);
     const pageMat = toonMat(0xf4efe2);
-    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.055, 0.26), coverMat);
-    const pages = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.045, 0.235), pageMat);
-    pages.position.y = 0.035;
+    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.225, 0.30, 0.085), coverMat);
+    const pages = new THREE.Mesh(new THREE.BoxGeometry(0.205, 0.27, 0.090), pageMat);
+    const frontCover = new THREE.Mesh(new THREE.BoxGeometry(0.225, 0.30, 0.015), coverMat);
+    frontCover.position.z = 0.053;
     const lock = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.042, 0.025), toonMat(0xc9a35f));
-    lock.position.set(0, 0.065, 0.13);
-    book.add(cover, pages, lock);
-    [0xe07a7a, 0x778fbd, 0xd8bd67].forEach((color, index) => {
-      const mark = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.012, 0.10), toonMat(color));
-      mark.position.set(-0.06 + index * 0.06, 0.068, -0.13);
+    lock.position.set(0.075, 0, 0.070);
+    book.add(cover, pages, frontCover, lock);
+    [0x9a6764, 0xc7a364].forEach((color, index) => {
+      const mark = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.08, 0.012), toonMat(color));
+      mark.position.set(-0.06 + index * 0.06, 0.16, 0);
       book.add(mark);
     });
-    book.position.set(0, -0.31, 0.09);
-    book.rotation.x = -0.62;
+    book.name = 'locked-research-book';
+    book.position.set(0.075, -0.22, 0.15);
+    book.rotation.set(-0.12, 0.15, 0.08);
     L.armL.add(book);
     const scholarMat = c.userData.trimMaterial || toonMat(0x6c688f);
-    [-0.10, 0.10].forEach((x, index) => {
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.34, 0.042), scholarMat);
-      panel.position.set(x, 0.44, -0.075);
-      panel.rotation.z = (index ? -1 : 1) * 0.055;
-      body.add(panel);
-    });
+    coat(scholarMat, { hem: 0.27, bottom: 0.29, trim: paper });
+    cuffs(c.userData.softMaterial);
     const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.035, 6, 18), toonMat(0x9aa1b2));
     scarf.rotation.x = Math.PI / 2;
     scarf.position.y = 0.85;
@@ -5902,6 +6103,11 @@ function addAgentAccessories(c, visual = {}) {
     crescent.position.set(-0.09, 0.73, 0.25);
     crescent.rotation.z = -0.35;
     body.add(scarf, crescent);
+    cutPanel(body, [[-0.13, 0.89], [0.12, 0.87], [0.17, 0.47], [0.05, 0.51], [-0.035, 0.46]],
+      toonMat(0x596273), [0, 0, -0.222], 'scholar-scarf-tail');
+    const satchel = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.10), leather);
+    satchel.position.set(0.21, 0.53, -0.04);
+    body.add(satchel);
     const ink = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 5), toonMat(0x3c4058));
     ink.position.set(0.025, -0.33, 0.052);
     L.armR.add(ink);
@@ -5909,12 +6115,15 @@ function addAgentAccessories(c, visual = {}) {
     c.userData.activityHeight = 1.56;
   } else if (style === 'forest-atelier') {
     // Small forest fairy: red twin braids, straw hat, brush and scent bottles.
-    const hairMat = addHairDome(0xb93a3f, { back: false });
+    const hairMat = addHairDome(0xb75b40, { back: false });
     [-0.18, 0.18].forEach((x, index) => {
-      const braid = new THREE.Mesh(new THREE.CapsuleGeometry(0.043, 0.22, 3, 8), hairMat);
-      braid.position.set(x, -0.13, -0.01);
-      braid.rotation.z = (index ? -1 : 1) * 0.08;
-      headRig?.add(braid);
+      for (let part = 0; part < 4; part++) {
+        const braid = new THREE.Mesh(new THREE.SphereGeometry(0.045 - part * 0.003, 7, 5), hairMat);
+        braid.name = 'braid-segment';
+        braid.scale.set(0.9, 1.2, 0.8);
+        braid.position.set(x + (part % 2 ? 0.008 : -0.008), -0.045 - part * 0.067, 0.085);
+        headRig?.add(braid);
+      }
       const ear = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.13, 7), toonMat(0xf4d8c5));
       ear.position.set(index ? 0.23 : -0.23, -0.005, 0);
       ear.rotation.z = (index ? -1 : 1) * Math.PI / 2;
@@ -5926,7 +6135,7 @@ function addAgentAccessories(c, visual = {}) {
       headRig?.add(freckle);
     });
     const straw = toonMat(0xd8bd78);
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.035, 16), straw);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.035, 16), straw);
     const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.15, 14), straw);
     brim.position.y = 0.18;
     crown.position.y = 0.27;
@@ -5934,27 +6143,41 @@ function addAgentAccessories(c, visual = {}) {
     ribbon.rotation.x = Math.PI / 2;
     ribbon.position.y = 0.225;
     headRig?.add(brim, crown, ribbon);
+    for (const [x, y, tilt] of [[0.19, 0.25, -0.6], [0.23, 0.30, -0.9], [0.13, 0.31, 0.4]]) {
+      const leaf = cutPanel(headRig, [[0, -0.045], [-0.025, 0], [0, 0.065], [0.026, 0]],
+        c.userData.bodyMaterial, [x, y, 0.12], 'hat-leaf', 0.018);
+      leaf.rotation.z = tilt;
+    }
+    const flower = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 4), paper);
+    flower.scale.set(1, 1, 0.35);
+    flower.position.set(0.20, 0.235, 0.16);
+    headRig?.add(flower);
     const brush = new THREE.Group();
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.34, 6), toonMat(0xc9a87c));
-    const bristle = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 8), toonMat(0xd91f4e));
+    const bristle = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.12, 8), toonMat(0x5e5249));
     bristle.position.y = 0.2;
     brush.add(handle, bristle);
     brush.position.set(0, -0.36, 0.06);
     brush.rotation.x = -0.5;
     L.armR.add(brush);
-    const apron = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.22, 0.026), toonMat(0xf8ded8));
+    const apron = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.22, 0.026), paper);
     apron.position.set(0, 0.64, 0.224);
     const skirt = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.19, 0.285, 0.27, 12),
-      c.userData.softMaterial || toonMat(0xf1b6b1),
+      new THREE.CylinderGeometry(0.19, 0.305, 0.32, 10),
+      c.userData.bodyMaterial,
     );
-    skirt.position.y = 0.46;
+    skirt.name = 'forest-layered-skirt';
+    skirt.position.y = 0.43;
+    const underskirt = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.29, 0.12, 10), paper);
+    underskirt.position.y = 0.27;
     const satchel = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.13, 0.07), toonMat(0xb79268));
     satchel.position.set(-0.235, 0.57, 0.07);
     const strap = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.39, 0.022), toonMat(0xb79268));
     strap.position.set(-0.10, 0.72, 0.20);
     strap.rotation.z = -0.48;
-    body.add(skirt, apron, satchel, strap);
+    body.add(skirt, underskirt, apron, satchel, strap);
+    cuffs();
+    belt();
     [0x8db9a4, 0xd6a2bd, 0xe8c66e].forEach((color, index) => {
       const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.023, 0.09, 7), toonMat(color));
       bottle.position.set(-0.17 + index * 0.055, 0.54, 0.245);
@@ -5964,65 +6187,87 @@ function addAgentAccessories(c, visual = {}) {
     c.userData.activityHeight = 1.58;
   } else if (style === 'resonance-listener') {
     // Last resonant: low-tied black hair, ear crystals and repaired tuning fork.
-    const hairMat = addHairDome(0x17191f);
+    const hairMat = addHairDome(0x242b30, { back: false });
     const ponytail = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.28, 3, 8), hairMat);
     ponytail.position.set(0, -0.20, -0.20);
     ponytail.rotation.x = -0.10;
     headRig?.add(ponytail);
-    const crystalMat = new THREE.MeshToonMaterial({
-      color: 0x63e0d4,
-      emissive: 0x1c4f5a,
-      emissiveIntensity: 0.45,
-      gradientMap: TOON_GRAD,
-    });
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.067, 0.012, 5, 12), gold);
+    tie.rotation.x = Math.PI / 2;
+    tie.position.set(0, -0.15, -0.20);
+    headRig?.add(tie);
+    const crystalMat = toonMat(0x83cfc5);
     [-1, 1].forEach(side => {
       for (let index = 0; index < 3; index++) {
-        const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.035 - index * 0.005, 0), crystalMat);
-        crystal.scale.y = 1.45;
-        crystal.position.set(side * (0.215 + index * 0.025), 0.045 - index * 0.055, -0.005);
+        const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.046 - index * 0.007, 0), crystalMat);
+        crystal.name = 'resonance-ear-crystal';
+        crystal.scale.y = 1.6;
+        crystal.position.set(side * (0.23 + index * 0.025), 0.045 - index * 0.050, -0.005);
         crystal.rotation.z = side * (0.42 + index * 0.15);
         headRig?.add(crystal);
       }
-      const irisRune = new THREE.Mesh(new THREE.TorusGeometry(0.038, 0.006, 5, 14), crystalMat);
-      irisRune.position.set(side * 0.07, 0.018, 0.223);
-      headRig?.add(irisRune);
     });
-    [-0.105, 0.105].forEach((x, index) => {
-      const robePanel = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.43, 0.048), c.userData.trimMaterial);
-      robePanel.position.set(x, 0.38, -0.085);
-      robePanel.rotation.z = (index ? -1 : 1) * 0.045;
-      body.add(robePanel);
-    });
-    const collar = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.055, 0.03), toonMat(0xd7e3df));
-    collar.position.set(0, 0.81, 0.22);
-    body.add(collar);
+    coat(c.userData.bodyMaterial, { hem: 0.29, bottom: 0.22 });
+    for (const side of [-1, 1]) {
+      const collar = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.23, 0.025), paper);
+      collar.position.set(side * 0.052, 0.77, 0.255);
+      collar.rotation.z = side * 0.52;
+      body.add(collar);
+      cutPanel(side < 0 ? L.armL : L.armR,
+        [[-0.07, -0.06], [0.07, -0.08], [0.095, -0.31], [-0.11, -0.35]],
+        c.userData.bodyMaterial, [0, 0, 0.015], 'listener-wide-sleeve', 0.09);
+    }
+    cuffs(paper, 0.077);
+    belt();
     const fork = makeTuningFork({ repair: true, scale: 1.0 });
     fork.position.set(0, -0.32, 0.07);
     fork.rotation.x = -0.58;
     L.armR.add(fork);
-    const pendant = makeTuningFork({ repair: true, scale: 0.34 });
-    pendant.position.set(0, 0.72, 0.245);
-    pendant.rotation.z = Math.PI;
-    body.add(pendant);
     c.userData.labelHeight = 1.70;
     c.userData.activityHeight = 1.57;
   } else if (style === 'star-warden-observer') {
     // Tall star-warden body with hidden hands, floating eyes and owl vessel.
-    const robeMat = c.userData.trimMaterial || toonMat(0x342d54);
-    const hood = new THREE.Mesh(new THREE.TorusGeometry(0.235, 0.062, 7, 20), robeMat);
-    hood.position.set(0, 0.01, 0.005);
-    headRig?.add(hood);
+    const robeMat = toonMat(0x514565);
+    addHairDome(0xc7bfcc, { fringe: false });
+    const hoodShape = new THREE.Shape([[-0.28, -0.13], [-0.29, 0.08], [-0.16, 0.27],
+      [0, 0.35], [0.16, 0.27], [0.29, 0.08], [0.28, -0.13], [0, -0.22]]
+      .map(([x, y]) => new THREE.Vector2(x, y)));
+    const faceOpening = new THREE.Path();
+    faceOpening.absellipse(0, -0.025, 0.208, 0.21, 0, Math.PI * 2, true, 0);
+    hoodShape.holes.push(faceOpening);
+    const hoodGeo = new THREE.ExtrudeGeometry(hoodShape, { depth: 0.34, bevelEnabled: false, steps: 1, curveSegments: 12 });
+    // Fold the crown inward so the pointed hood remains soft in profile.
+    const hoodPositions = hoodGeo.attributes.position;
+    for (let i = 0; i < hoodPositions.count; i++) {
+      const taper = 1 - 0.65 * THREE.MathUtils.clamp((hoodPositions.getY(i) - 0.08) / 0.27, 0, 1);
+      hoodPositions.setZ(i, 0.17 + (hoodPositions.getZ(i) - 0.17) * taper);
+    }
+    hoodGeo.computeVertexNormals();
+    hoodGeo.clearGroups();
+    const hood = new THREE.Mesh(hoodGeo, robeMat);
+    hood.name = 'pointed-paper-hood';
+    hood.position.z = -0.16;
+    const hoodBack = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10, Math.PI, Math.PI), robeMat);
+    headRig?.add(hoodBack, hood);
+    for (const side of [-1, 1]) {
+      cutPanel(headRig, [[0.14, 0.08], [0.20, -0.03], [0.17, -0.30], [0.11, -0.34], [0.13, -0.14]]
+        .map(([x, y]) => [x * side, y]), toonMat(0xc7bfcc), [0, 0, 0.18], 'warden-silver-lock', 0.03);
+    }
     const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.31, 0.66, 12), robeMat);
     robe.position.y = 0.48;
     const cloak = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.62, 0.055), robeMat);
     cloak.position.set(0, 0.53, -0.21);
     cloak.rotation.x = -0.06;
     body.add(robe, cloak);
+    cutPanel(body, [[-0.052, 0.81], [0.052, 0.81], [0.12, 0.18], [-0.12, 0.18]],
+      paper, [0, 0, 0.273], 'warden-inner-robe');
     [L.armL, L.armR].forEach((arm, index) => {
       const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.28, 4, 8), robeMat);
       sleeve.position.set(0, -0.17, 0.005);
       sleeve.scale.set(1.15, 1.15, 1.05);
       arm.add(sleeve);
+      cutPanel(arm, [[-0.09, -0.12], [0.085, -0.12], [0.11, -0.36], [0.035, -0.42], [-0.10, -0.34]],
+        paper, [0, 0, 0.075], 'hidden-hand-cuff', 0.04);
       arm.rotation.z = (index ? -1 : 1) * 0.38;
     });
     const starMat = toonMat(0xd7cee9);
@@ -6032,7 +6277,7 @@ function addAgentAccessories(c, visual = {}) {
       body.add(star);
     });
     const eyeGold = toonMat(0xf2cf70);
-    [[-0.34, 1.05, -0.03], [0.34, 0.92, 0.01], [0.28, 1.25, -0.06]].forEach(([x, y, z], index) => {
+    [[-0.34, 1.16, -0.03], [0.34, 1.16, -0.03]].forEach(([x, y, z], index) => {
       const eye = new THREE.Group();
       const rim = new THREE.Mesh(new THREE.TorusGeometry(0.060 - index * 0.006, 0.012, 6, 16), eyeGold);
       const core = new THREE.Mesh(new THREE.SphereGeometry(0.024, 7, 5), toonMat(0x29233f));
@@ -6041,10 +6286,11 @@ function addAgentAccessories(c, visual = {}) {
       eye.position.set(x, y, z);
       body.add(eye);
     });
-    const owl = makeBronzeOwlVessel(0.68);
-    owl.position.set(0.34, 0.38, 0.08);
+    const owl = makeBronzeOwlVessel(0.48);
+    owl.name = 'small-bronze-owl-vessel';
+    owl.position.set(0.36, 0.07, 0.08);
     owl.rotation.y = -0.22;
-    body.add(owl);
+    c.add(owl);
     c.userData.lockedSleeves = true;
     c.userData.labelHeight = 1.82;
     c.userData.activityHeight = 1.68;
@@ -6765,15 +7011,8 @@ const JUMP_SPEED = 4.0, GRAVITY = 12.0;
 // Input
 // ---------------------------------------------------------------------------
 const keys = {};
-document.addEventListener('village-board-open', () => {
-  for (const key of Object.keys(keys)) delete keys[key];
-  jumpRequested = false;
-});
-document.addEventListener('rose-story-open', () => {
-  for (const key of Object.keys(keys)) delete keys[key];
-  stickVec.x = stickVec.y = 0;
-  jumpRequested = false;
-});
+document.addEventListener('village-board-open', () => resetTransientControls());
+document.addEventListener('rose-story-open', () => resetTransientControls());
 const MOVEMENT_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
 let jumpRequested = false;
 addEventListener('keydown', e => {
@@ -6912,30 +7151,42 @@ function chooseAgentFocusSide(npc) {
   return best;
 }
 
-// mouse drag to orbit the camera around the player (rotates the camDir anchor)
-let dragging = false, camPitch = 0.68, lastX = 0, lastY = 0;
+// One canvas contact orbits; two canvas contacts pinch without mixing joystick input.
+let dragging = false, camPitch = 0.68;
+const orbitGesture = createOrbitGesture();
+const touchPts = orbitGesture.pointers;
 let dashboardYaw = 0;
 const dashboardOrbitAxis = new THREE.Vector3(0, 1, 0);
 let cameraIntro = null;
 renderer.domElement.addEventListener('pointerdown', e => {
+  if (!orbitGesture.begin(e)) return;
+  try { renderer.domElement.setPointerCapture(e.pointerId); } catch { orbitGesture.end(e); return; }
+  if (editMode && touchPts.size > 1) finishEditPointer(true);
   if (editMode) return;
   if (cameraIntro) skipCameraIntro();
   dashboardStopPatrol();
-  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  dragging = true;
 });
-addEventListener('pointerup', () => dragging = false);
+function endOrbitPointer(event) {
+  orbitGesture.end(event);
+  dragging = touchPts.size > 0 && !editMode;
+}
+addEventListener('pointerup', endOrbitPointer);
+addEventListener('pointercancel', endOrbitPointer);
+renderer.domElement.addEventListener('lostpointercapture', endOrbitPointer);
 addEventListener('pointermove', e => {
-  if (editMode || !dragging) return;
-  const yawDelta = -(e.clientX - lastX) * 0.005;
+  const delta = orbitGesture.move(e);
+  if (!delta || editMode || !dragging) return;
+  if (delta.zoom) applyZoom(delta.zoom);
+  const yawDelta = -delta.dx * 0.005;
   if (experienceMode === 'dashboard') {
     dashboardYaw = wrappedAngle(dashboardYaw + yawDelta);
   } else {
     camDir.applyAxisAngle(playerDir.clone().normalize(), yawDelta);
     keepTangentAtPlayer(camDir);
   }
-  camPitch += (e.clientY - lastY) * 0.005;
+  camPitch += delta.dy * 0.005;
   camPitch = Math.max(0.05, Math.min(1.2, camPitch));
-  lastX = e.clientX; lastY = e.clientY;
 });
 
 // ---- zoom: mouse wheel + two-finger pinch ----
@@ -7042,6 +7293,9 @@ addEventListener('wheel', e => {
 
 function setExperienceMode(mode) {
   dashboardCloseTeam();
+  joystickControls.reset();
+  orbitGesture.reset();
+  dragging = false;
   experienceMode = mode === 'explore' ? 'explore' : 'dashboard';
   if (experienceMode === 'explore') dashboardStopPatrol();
   if (experienceMode === 'explore') markVisitorStep('explore');
@@ -7077,58 +7331,25 @@ renderer.domElement.addEventListener('wheel', e => {
   e.preventDefault();
   if (editMode) return;
   if (cameraIntro) { skipCameraIntro(); return; }
-  applyZoom(e.deltaY * 0.012);
+  applyZoom(wheelPixels(e, innerHeight) * 0.012);
 }, { passive: false });
-
-// pinch-to-zoom on touch devices
-const pinch = { active: false, startDist: 0, startCam: exploreCameraDistance() };
-const touchPts = new Map();
-renderer.domElement.addEventListener('pointerdown', e => {
-  if (e.pointerType === 'touch') touchPts.set(e.pointerId, e);
-});
-renderer.domElement.addEventListener('pointermove', e => {
-  if (e.pointerType !== 'touch') return;
-  if (touchPts.has(e.pointerId)) touchPts.set(e.pointerId, e);
-  if (touchPts.size === 2) {
-    dragging = false;                              // pinch overrides drag-orbit
-    const [a, b] = [...touchPts.values()];
-    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-    if (!pinch.active) { pinch.active = true; pinch.startDist = d; pinch.startCam = camDist; }
-    else { camDist = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinch.startCam - (d - pinch.startDist) * 0.03)); }
-  }
-});
-function clearTouch(e) { touchPts.delete(e.pointerId); if (touchPts.size < 2) pinch.active = false; }
-addEventListener('pointerup', clearTouch);
-addEventListener('pointercancel', clearTouch);
 
 // mobile virtual joystick
 let stickVec = { x: 0, y: 0 };
-addEventListener('blur', () => {
+const joystickControls = bindVirtualJoystick({
+  stick: document.getElementById('stick'), knob: document.getElementById('knob'), vector: stickVec,
+  enabled: () => !editMode && experienceMode === 'explore'
+    && !document.body.matches('.agent-detail-open, .service-detail-open, .team-overview-open')
+    && !villageBoard.isOpen() && !roseStory.isOpen(),
+});
+function resetTransientControls() {
   for (const key of Object.keys(keys)) keys[key] = false;
   jumpRequested = false;
-  stickVec.x = stickVec.y = 0;
-});
-(function joystick() {
-  const stick = document.getElementById('stick'), knob = document.getElementById('knob');
-  let active = false, cx = 0, cy = 0;
-  const radius = 44;
-  stick.addEventListener('pointerdown', e => {
-    active = true; const r = stick.getBoundingClientRect();
-    cx = r.left + r.width/2; cy = r.top + r.height/2; stick.setPointerCapture(e.pointerId);
-  });
-  stick.addEventListener('pointermove', e => {
-    if (!active) return;
-    let dx = e.clientX - cx, dy = e.clientY - cy;
-    const len = Math.hypot(dx, dy) || 1;
-    const cl = Math.min(len, radius);
-    dx = dx/len*cl; dy = dy/len*cl;
-    knob.style.transform = `translate(${dx}px, ${dy}px)`;
-    stickVec.x = dx/radius; stickVec.y = dy/radius;
-  });
-  const end = () => { active = false; stickVec.x = stickVec.y = 0; knob.style.transform = ''; };
-  stick.addEventListener('pointerup', end);
-  stick.addEventListener('pointercancel', end);
-})();
+  joystickControls.reset();
+  orbitGesture.reset();
+  dragging = false;
+}
+addEventListener('blur', resetTransientControls);
 
 document.getElementById('mobileJumpBtn')?.addEventListener('click', () => {
   if (!editMode && experienceMode === 'explore') jumpRequested = true;
@@ -7280,6 +7501,7 @@ function chooseNpcAvoidanceHeading(dir, basis, heading) {
 
 const NPC_MIN_SEP = 2.2;   // start steering away from neighbors within this range
 const NPC_HARD_SEP = 1.1;  // never allowed closer than this (hard clamp)
+const agentSeparation = createAgentSeparation({ radius: R, minDistance: NPC_MIN_SEP, hardDistance: NPC_HARD_SEP });
 const NPC_TURN_RATE = 2.4; // max radians/sec a body can rotate
 let npcTime = 0;           // accumulated sim time (for deterministic walk-bob)
 function updateNPCs(dt) {
@@ -7359,31 +7581,8 @@ function updateNPCs(dt) {
     }
 
     // (2) separation steering: bias the goal heading away from close characters
-    const myPos = ud.dir.clone().multiplyScalar(R);
-    const away = new THREE.Vector3();
-    let crowded = 0;
-    for (const o of npcs) {
-      if (o === c) continue;
-      const oPos = o.userData.dir.clone().multiplyScalar(R);
-      const d = myPos.distanceTo(oPos);
-      if (d < NPC_MIN_SEP && d > 1e-4) {
-        const t = myPos.clone().sub(oPos).normalize();
-        t.sub(ud.dir.clone().multiplyScalar(t.dot(ud.dir)));   // project to tangent plane
-        away.add(t.multiplyScalar((NPC_MIN_SEP - d) / NPC_MIN_SEP));
-        crowded++;
-      }
-    }
-    { // also keep clear of the player
-      const oPos = playerDir.clone().multiplyScalar(R);
-      const d = myPos.distanceTo(oPos);
-      if (d < NPC_MIN_SEP && d > 1e-4) {
-        const t = myPos.clone().sub(oPos).normalize();
-        t.sub(ud.dir.clone().multiplyScalar(t.dot(ud.dir)));
-        away.add(t.multiplyScalar((NPC_MIN_SEP - d) / NPC_MIN_SEP));
-        crowded++;
-      }
-    }
-    if (crowded > 0 && away.lengthSq() > 1e-6 && !(ud.avoidTimer > 0)) {
+    const away = agentSeparation.steer(ud.dir, npcs, c, playerDir);
+    if (away.lengthSq() > 1e-6 && !(ud.avoidTimer > 0)) {
       const aN = away.dot(b.north), aE = away.dot(b.east);
       ud.desiredHeading = Math.atan2(aE, aN);
     }
@@ -7430,24 +7629,7 @@ function updateNPCs(dt) {
 
     // (5) hard non-overlap clamp: if still inside HARD_SEP of anyone, slide directly
     // apart along the surface. This is the guarantee that they can NEVER overlap.
-    {
-      const here = ud.dir.clone().multiplyScalar(R);
-      const others = npcs.filter(o => o !== c).map(o => o.userData.dir).concat([playerDir]);
-      for (const oDir of others) {
-        const oPos = oDir.clone().multiplyScalar(R);
-        const d = here.distanceTo(oPos);
-        if (d < NPC_HARD_SEP && d > 1e-4) {
-          const t = here.clone().sub(oPos).normalize();
-          t.sub(ud.dir.clone().multiplyScalar(t.dot(ud.dir)));     // tangent
-          if (t.lengthSq() > 1e-6) {
-            const sAxis = new THREE.Vector3().crossVectors(ud.dir, t.normalize()).normalize();
-            _q.setFromAxisAngle(sAxis, (NPC_HARD_SEP - d) / R);     // rotate to reach the gap
-            ud.dir.applyQuaternion(_q).normalize();
-            here.copy(ud.dir.clone().multiplyScalar(R));
-          }
-        }
-      }
-    }
+    agentSeparation.resolve(ud.dir, npcs, c, playerDir);
 
     // Character separation above can itself push an NPC into a nearby post.
     // Resolve once more, then detect true lack of progress and choose a new gap.
@@ -7977,8 +8159,10 @@ function updateEditCamera(dt) {
 
 // pointer handlers — only active while editing. Registered once; they early-out
 // when not in edit mode so they don't interfere with the play-mode controls.
+let editPointerId = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (!editMode || e.pointerType === 'touch' && touchPts.size > 1) return;
+  if (!editMode || e.button !== 0 || touchPts.size > 1 || editPointerId !== null) return;
+  editPointerId = e.pointerId;
   setPointerNDC(e);
   lastPointer = { x: e.clientX, y: e.clientY };
 
@@ -7999,7 +8183,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   }
 });
 addEventListener('pointermove', (e) => {
-  if (!editMode) return;
+  if (!editMode || e.pointerId !== editPointerId) return;
   // dragging while drawing → orbit the camera (and cancel the pending point)
   if (drawingType && drawPointerStart) {
     const moved = Math.hypot(e.clientX - drawPointerStart.x, e.clientY - drawPointerStart.y);
@@ -8024,6 +8208,7 @@ addEventListener('pointermove', (e) => {
   }
 });
 function finishEditPointer(cancelled = false) {
+  editPointerId = null;
   // commit a drawing point if the press was a click (not a drag)
   if (drawingType && drawPointerStart) {
     if (!cancelled && pendingDrawDir) addDrawPoint(pendingDrawDir);
@@ -8038,13 +8223,16 @@ function finishEditPointer(cancelled = false) {
   editDragging = false;
   camOrbiting = false;
 }
-addEventListener('pointerup', () => finishEditPointer());
-addEventListener('pointercancel', () => finishEditPointer(true));
+addEventListener('pointerup', (e) => { if (e.pointerId === editPointerId) finishEditPointer(); });
+addEventListener('pointercancel', (e) => { if (e.pointerId === editPointerId) finishEditPointer(true); });
+renderer.domElement.addEventListener('lostpointercapture', (e) => {
+  if (e.pointerId === editPointerId) finishEditPointer(true);
+});
 addEventListener('blur', () => finishEditPointer(true));
 // wheel zooms the edit camera (independent of the play-mode zoom)
 renderer.domElement.addEventListener('wheel', (e) => {
   if (!editMode) return;
-  editDist = Math.max(6, Math.min(40, editDist + e.deltaY * 0.02));
+  editDist = Math.max(6, Math.min(40, editDist + wheelPixels(e, innerHeight) * 0.02));
 }, { passive: false });
 
 // double-click finishes the current path drawing
@@ -8154,6 +8342,9 @@ function publishDevMetrics(elapsed) {
     ...performanceGovernor.state(),
     ...horizonCulling,
   });
+  document.documentElement.dataset.qaInput = JSON.stringify({
+    pointers: touchPts.size, dragging, stick: { ...stickVec }, mode: experienceMode,
+  });
   document.documentElement.dataset.qaRenderStability = JSON.stringify({
     sceneSamples: composer.renderTarget1.samples,
     bloomThreshold: bloom.threshold,
@@ -8161,6 +8352,7 @@ function publishDevMetrics(elapsed) {
   });
   document.documentElement.dataset.qaEfficiency = JSON.stringify({
     loop: worldLoop.state(), labels: labelSizeCache.state(),
+    models: { loaderRequested: !!gltfLoaderPromise, cachedPrototypes: modelProtoCache.size },
   });
   document.documentElement.dataset.qaCompass = JSON.stringify(landmarkCompass.state());
   document.documentElement.dataset.qaAudio = JSON.stringify(ambientAudio.state());
@@ -8413,7 +8605,8 @@ function animate(dt, elapsed, now) {
 
   // ---- NPCs wander the planet with smooth steering; they never overlap ----
   updateNPCs(dt);
-  skySystem.update({ dt, elapsed, playerDirection: playerDir });
+  skySystem.update({ dt, elapsed, playerDirection: playerDir,
+    viewDirection: experienceMode === 'explore' ? playerDir : camera.position });
   const atmosphere = skySystem.ambientState();
   updateHorizonCulling();
   updateAmbientScene(elapsed, atmosphere);
@@ -8434,9 +8627,13 @@ function animate(dt, elapsed, now) {
 }
 
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+  resetTransientControls();
+  finishEditPointer(true);
+  const width = Math.max(1, innerWidth), height = Math.max(1, innerHeight);
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  performanceGovernor.resize(innerWidth, innerHeight);
+  performanceGovernor.resize(width, height);
+  paperPixelSamples = 0;
   if (experienceMode === 'dashboard' && !cameraIntro) {
     camDist = document.body.classList.contains('intro-active')
       ? introCameraDistance()
@@ -8449,12 +8646,7 @@ addEventListener('resize', () => {
 const worldLoop = createVisibilityLoop({
   frame: animate,
   blocked: () => webglContextLost,
-  onPause: () => {
-    for (const key of Object.keys(keys)) keys[key] = false;
-    stickVec.x = 0;
-    stickVec.y = 0;
-    jumpRequested = false;
-  },
+  onPause: () => { resetTransientControls(); finishEditPointer(true); },
 });
 renderer.domElement.addEventListener('webglcontextlost', () => worldLoop.refresh());
 renderer.domElement.addEventListener('webglcontextrestored', () => worldLoop.refresh());
@@ -9468,9 +9660,15 @@ addEventListener('keydown', anyKeyStart);
   // ---- 3D에서 에이전트 클릭 → 카드 (플레이 모드 전용) ----
   let clickStart = null;
   renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (touchPts.size > 1) { clickStart = null; return; }
     if (editMode || e.button !== 0) return;
     clickStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
   });
+  addEventListener('pointermove', (e) => {
+    if (clickStart && e.pointerId === clickStart.pointerId
+      && Math.hypot(e.clientX - clickStart.x, e.clientY - clickStart.y) > 6) clickStart = null;
+  });
+  addEventListener('blur', () => { clickStart = null; });
   addEventListener('pointercancel', () => { clickStart = null; });
   addEventListener('pointerup', (e) => {
     if (editMode || !clickStart) return;
@@ -9922,8 +10120,8 @@ addEventListener('keydown', anyKeyStart);
 // ===========================================================================
 // HOUSE SERVICES — 각 집은 서비스의 현관이다. 문 앞에 서면 입장 프롬프트가
 // 뜨고(F / 탭), 집을 클릭해도 열린다. 어떤 집이 어떤 서비스인지는
-// config/services.json에서 편집한다. url이 있으면 온라인 확인 후 열기/미리보기,
-// 없으면 '준비 중'으로 표시.
+// config/services.json에서 편집한다. 실행 주소와 소스 저장소를 구분하며,
+// 외부 서비스를 미리 호출하거나 실시간 온라인 상태로 추정하지 않는다.
 // ===========================================================================
 (function wireHouseServices() {
   const panelEl = document.getElementById('servicePanel');
@@ -9942,27 +10140,21 @@ addEventListener('keydown', anyKeyStart);
   let nearBoat = null;
   let interactionPromptKey = '';
   let servicePanelOpener = null;
-  let reachSeq = 0;
-
-  // ---- reachability: opaque no-cors fetch — resolve = something answered ----
-  function checkReachable(url, cb) {
-    const seq = ++reachSeq;
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 2500);
-    fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal })
-      .then(() => { if (seq === reachSeq) cb(true); })
-      .catch(() => { if (seq === reachSeq) cb(false); })
-      .finally(() => clearTimeout(to));
+  const serviceSelect = el('serviceSelect');
+  for (const agent of AGENTS) {
+    const option = document.createElement('option');
+    option.value = agent.key;
+    option.textContent = `${agent.kor} · ${agent.service?.name || '서비스 준비 중'}`;
+    serviceSelect.appendChild(option);
   }
-
-  function setOnlineBadge(state) {   // checking | online | offline | planned | external | private
-    const badge = el('serviceOnline');
-    badge.className = 'service-online ' + state;
-    badge.textContent = {
-      checking: '확인 중…', online: '● 온라인', offline: '● 오프라인',
-      planned: '준비 중', external: '↗ 외부 링크', private: '개인 네트워크',
-    }[state];
-  }
+  serviceSelect.addEventListener('change', () => {
+    const agent = AGENTS.find((entry) => entry.key === serviceSelect.value);
+    if (!agent) return;
+    const opener = servicePanelOpener;
+    openServicePanel(agent);
+    servicePanelOpener = opener;
+    requestAnimationFrame(() => serviceSelect.focus());
+  });
 
   function setServiceTab(tab, focus = false) {
     const showResults = tab === 'results';
@@ -10064,43 +10256,25 @@ addEventListener('keydown', anyKeyStart);
     el('serviceIcon').textContent = svc?.icon || '🏠';
     el('serviceName').textContent = svc ? svc.name : `${a.kor}의 집`;
     el('serviceOwner').textContent = `${a.kor}의 집`;
+    serviceSelect.value = a.key;
     el('serviceDesc').textContent = svc ? (svc.desc || '') : '이 집엔 아직 서비스가 등록되지 않았어요. config/services.json에서 추가할 수 있습니다.';
-    const openBtn = el('serviceOpenBtn');
-    const url = svc?.url?.trim();
-    let parsedUrl = null;
-    try {
-      if (url) parsedUrl = new URL(url, location.href);
-      if (parsedUrl && !['http:', 'https:'].includes(parsedUrl.protocol)) parsedUrl = null;
-    } catch (_) { /* invalid service URL */ }
-    const localOnly = parsedUrl && LOCAL_HOSTS.has(parsedUrl.hostname);
-    const privateOnPublic = !!(localOnly && !IS_LOCAL_RUNTIME);
+    const details = renderServiceDetails({
+      features: el('serviceFeatures'), repository: el('serviceRepoBtn'),
+      open: el('serviceOpenBtn'), checked: el('serviceChecked'),
+    }, svc || {}, { allowLocal: IS_LOCAL_RUNTIME && URL_PARAMS.get('publicPreview') !== '1' });
+    const parsedUrl = details.url ? new URL(details.url) : null;
     const crossOrigin = !!(parsedUrl && parsedUrl.origin !== location.origin);
-    const note = privateOnPublic
-      ? '이 서비스는 운영자의 개인 네트워크에서만 연결됩니다.'
-      : (svc?.note || '');
+    const note = svc?.note || '';
     el('serviceNote').textContent = note;
     el('serviceNote').hidden = !note;
 
-    if (parsedUrl && !privateOnPublic) {
-      openBtn.hidden = false;
-      openBtn.onclick = () => window.open(parsedUrl.href, '_blank', 'noopener');
-      if (crossOrigin && !IS_LOCAL_RUNTIME) setOnlineBadge('external');
-      else {
-        setOnlineBadge('checking');
-        checkReachable(parsedUrl.href, (ok) => setOnlineBadge(ok ? 'online' : 'offline'));
-      }
-    } else if (privateOnPublic) {
-      openBtn.hidden = true;
-      setOnlineBadge('private');
-    } else {
-      openBtn.hidden = true;
-      setOnlineBadge('planned');
-    }
+    el('serviceOnline').className = `service-online ${details.status}`;
+    el('serviceOnline').textContent = details.label;
 
     // embedded preview — only for services that opt in (local apps)
     frameWrap.textContent = '';
     frameWrap.hidden = true;
-    if (parsedUrl && !privateOnPublic && svc.embed && (!crossOrigin || IS_LOCAL_RUNTIME)) {
+    if (parsedUrl && svc.embed && (!crossOrigin || IS_LOCAL_RUNTIME)) {
       const iframe = document.createElement('iframe');
       iframe.src = parsedUrl.href;
       iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-pointer-lock');
@@ -10359,6 +10533,7 @@ if (URL_PARAMS.has('dev')) {
         key: agent.key,
         character: agent.character,
         visualStyle: agent.npc?.userData.visualStyle || '',
+        designRevision: agent.npc?.userData.designRevision || '',
         scale: +(agent.npc?.scale.x || 0).toFixed(2),
         labelHeight: agent.npc?.userData.labelHeight || null,
         childMeshes: agent.npc?.getObjectsByProperty('isMesh', true).length || 0,

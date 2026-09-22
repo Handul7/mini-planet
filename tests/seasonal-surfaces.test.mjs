@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as THREE from '../vendor/three/build/three.module.min.js';
+import { prepareSeasonalFoliage, prepareSeasonalGround, setSurfaceSeason } from '../src/seasonal-surfaces.js';
+import { createSnow } from '../src/snow.js';
+
+test('seasonal foliage changes green faces once, preserves paper edges, and restores summer exactly', () => {
+  const geometry = new THREE.BufferGeometry();
+  const base = new Float32Array([0.2, 0.6, 0.3, 0.92, 0.90, 0.85]);
+  geometry.setAttribute('color', new THREE.BufferAttribute(base.slice(), 3));
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+  prepareSeasonalFoliage(mesh);
+  const attribute = geometry.getAttribute('color');
+  setSurfaceSeason('winter');
+  mesh.onBeforeRender();
+  assert.notDeepEqual(attribute.array.slice(0, 3), base.slice(0, 3));
+  assert.deepEqual(attribute.array.slice(3), base.slice(3));
+  const version = attribute.version;
+  mesh.onBeforeRender();
+  assert.equal(attribute.version, version);
+  setSurfaceSeason('summer');
+  mesh.onBeforeRender();
+  assert.deepEqual(attribute.array, base);
+  geometry.dispose(); mesh.material.dispose();
+});
+
+test('ground changes without altering geometry, existing hooks, or unrelated roof colors', () => {
+  const material = new THREE.MeshBasicMaterial({ color: 0x77aa77 });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(), material);
+  const roof = new THREE.MeshBasicMaterial({ color: 0x33775a });
+  const roofColor = roof.color.clone(), original = material.color.clone(), geometry = mesh.geometry;
+  let hooks = 0;
+  mesh.onBeforeRender = () => hooks++;
+  prepareSeasonalGround(mesh);
+  setSurfaceSeason('winter'); mesh.onBeforeRender();
+  assert.notDeepEqual(material.color, original);
+  assert.deepEqual(roof.color, roofColor);
+  assert.equal(mesh.geometry, geometry);
+  setSurfaceSeason('summer'); mesh.onBeforeRender();
+  assert.deepEqual(material.color, original);
+  assert.equal(hooks, 2);
+  geometry.dispose(); material.dispose(); roof.dispose();
+});
+
+test('snow remains one bounded draw pool, moves finite vertices, and rebases on the opposite side', () => {
+  const scene = new THREE.Scene();
+  const snow = createSnow(scene, 7.47);
+  assert.equal(scene.children.length, 1);
+  assert.equal(snow.count, 240);
+  assert.equal(snow.points.visible, false);
+  snow.setActiveCount(96);
+  assert.equal(snow.geometry.drawRange.count, 96);
+  const attribute = snow.geometry.getAttribute('position'), array = attribute.array;
+  const front = new THREE.Vector3(0, 1, 0);
+  snow.step(1 / 30, 0.5, front, 0);
+  const first = array.slice();
+  for (let i = 1; i < 400; i++) snow.step(1 / 30, 0.5, front, i / 30);
+  assert.notDeepEqual(array, first);
+  assert.ok(array.every(Number.isFinite));
+  assert.equal(attribute.array, array);
+  assert.equal(scene.children.length, 1);
+  front.negate(); snow.step(1 / 30, 0.5, front, 15);
+  for (let i = 0; i < 96; i++) assert.ok(array[i * 3 + 1] < 0);
+  snow.setActiveCount(100000);
+  assert.equal(snow.activeCount, 240);
+  snow.setActiveCount(-1);
+  assert.equal(snow.activeCount, 0);
+  snow.dispose();
+  assert.equal(scene.children.length, 0);
+});

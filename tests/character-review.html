@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mini Planet Character Review</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#dce7e4;color:#283a3d;font:14px system-ui}canvas{display:block;width:100vw;height:100vh}nav{position:fixed;top:16px;left:16px;right:16px;display:flex;flex-wrap:wrap;align-items:center;gap:16px}label{display:flex;align-items:center;gap:8px}select{max-width:150px;padding:6px}input[type=range]{width:150px}.name{position:fixed;pointer-events:none;transform:translate(-50%,-50%);font-weight:600;white-space:nowrap}
+</style>
+<nav>
+<select aria-label="캐릭터"><option value="all">전체</option></select>
+<label>회전 <input aria-label="회전" type="range" min="0" max="360" value="0"></label>
+<label><input aria-label="걷기" type="checkbox" checked>걷기</label>
+</nav>
+<script type="importmap">{"imports":{"three":"../vendor/three/build/three.module.min.js"}}</script>
+<script type="module" src="./character-review.mjs"></script>
+</html>

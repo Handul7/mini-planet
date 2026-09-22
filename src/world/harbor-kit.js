@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three/build/three.module.min.js';
 import { mergeGeometries } from '../../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
-import { makePaperCanopy } from '../paper-style.js?v=97';
-import { makePaperSlab } from './paper-assets.js?v=110';
+import { makePaperCanopy } from '../paper-style.js?v=114';
+import { makePaperSlab } from './paper-assets.js?v=114';
 
 function paperRoofPanels(specs, material) {
   const group = new THREE.Group();

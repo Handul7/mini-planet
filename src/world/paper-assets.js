@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three/build/three.module.min.js';
 import { mergeGeometries } from '../../vendor/three/examples/jsm/utils/BufferGeometryUtils.js';
-import { paperCutGeometry } from '../paper-style.js?v=97';
+import { paperCutGeometry } from '../paper-style.js?v=114';
 
 const CUT_EDGE = 0xf4f0e7;
 const rectangle = (w, h, x = 0, y = 0) => [
