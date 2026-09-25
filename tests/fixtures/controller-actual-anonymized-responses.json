@@ -1,0 +1,1350 @@
+{
+  "/api/v1/status": {
+    "controller": {
+      "reachable": true,
+      "status": "ok",
+      "upstream": "http://127.0.0.1:9119",
+      "instance_id": "anonymous_1"
+    },
+    "resident": {
+      "overall_activity": "unknown",
+      "running_board_count": null
+    },
+    "resources": {
+      "board": {
+        "source": "dashboard",
+        "status": "stale",
+        "observed_at": "2026-09-25T13:32:56.765993Z",
+        "last_success_at": "2026-09-25T13:32:56.765993Z",
+        "expires_at": "2026-09-25T13:33:11.765995Z",
+        "stale": true,
+        "last_attempt_at": "2026-09-25T13:32:56.735459Z",
+        "last_error": null
+      },
+      "jobs:default": {
+        "source": "dashboard",
+        "status": "stale",
+        "observed_at": "2026-09-25T13:32:56.778156Z",
+        "last_success_at": "2026-09-25T13:32:56.778156Z",
+        "expires_at": "2026-09-25T13:33:11.778160Z",
+        "stale": true,
+        "last_attempt_at": "2026-09-25T13:32:56.774902Z",
+        "last_error": null
+      },
+      "jobs:rodi": {
+        "source": "dashboard",
+        "status": "stale",
+        "observed_at": "2026-09-25T13:32:56.782146Z",
+        "last_success_at": "2026-09-25T13:32:56.782146Z",
+        "expires_at": "2026-09-25T13:33:11.782148Z",
+        "stale": true,
+        "last_attempt_at": "2026-09-25T13:32:56.779366Z",
+        "last_error": null
+      },
+      "jobs:jarvis": {
+        "source": "dashboard",
+        "status": "stale",
+        "observed_at": "2026-09-25T13:32:56.786635Z",
+        "last_success_at": "2026-09-25T13:32:56.786635Z",
+        "expires_at": "2026-09-25T13:33:11.786637Z",
+        "stale": true,
+        "last_attempt_at": "2026-09-25T13:32:56.783267Z",
+        "last_error": null
+      },
+      "results:rodi": {
+        "source": "dashboard",
+        "status": "stale",
+        "observed_at": "2026-09-25T13:32:56.796294Z",
+        "last_success_at": "2026-09-25T13:32:56.796294Z",
+        "expires_at": "2026-09-25T13:33:11.796296Z",
+        "stale": true,
+        "last_attempt_at": "2026-09-25T13:32:56.788088Z",
+        "last_error": null
+      }
+    }
+  },
+  "/api/v1/board": {
+    "source": "dashboard",
+    "status": "ok",
+    "observed_at": "2026-09-25T13:33:42.388124Z",
+    "last_success_at": "2026-09-25T13:33:42.388124Z",
+    "expires_at": "2026-09-25T13:33:57.388129Z",
+    "stale": false,
+    "error": null,
+    "data": {
+      "scope": {
+        "board": "default",
+        "include_archived": false
+      },
+      "counts": {
+        "triage": 0,
+        "todo": 0,
+        "scheduled": 0,
+        "ready": 0,
+        "running": 0,
+        "blocked": 0,
+        "review": 0,
+        "done": 116
+      },
+      "task_count": 116,
+      "archived_total": null,
+      "tasks": [
+        {
+          "id": "anonymous_2",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-24T08:30:08Z",
+          "started_at": "2026-09-24T08:36:02Z",
+          "completed_at": "2026-09-24T08:40:26Z"
+        },
+        {
+          "id": "anonymous_3",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-24T08:29:55Z",
+          "started_at": "2026-09-24T08:30:01Z",
+          "completed_at": "2026-09-24T08:35:26Z"
+        },
+        {
+          "id": "anonymous_4",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-24T08:08:03Z",
+          "started_at": "2026-09-24T08:12:59Z",
+          "completed_at": "2026-09-24T08:16:22Z"
+        },
+        {
+          "id": "anonymous_5",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-24T08:07:52Z",
+          "started_at": "2026-09-24T08:07:58Z",
+          "completed_at": "2026-09-24T08:12:31Z"
+        },
+        {
+          "id": "anonymous_6",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-24T01:04:35Z",
+          "started_at": "2026-09-24T01:09:54Z",
+          "completed_at": "2026-09-24T01:13:06Z"
+        },
+        {
+          "id": "anonymous_7",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-24T01:04:21Z",
+          "started_at": "2026-09-24T01:04:53Z",
+          "completed_at": "2026-09-24T01:09:07Z"
+        },
+        {
+          "id": "anonymous_8",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-23T19:45:54Z",
+          "started_at": "2026-09-23T19:53:04Z",
+          "completed_at": "2026-09-23T19:57:19Z"
+        },
+        {
+          "id": "anonymous_9",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-23T13:48:01Z",
+          "started_at": "2026-09-23T13:49:13Z",
+          "completed_at": "2026-09-23T19:52:18Z"
+        },
+        {
+          "id": "anonymous_10",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-23T13:34:58Z",
+          "started_at": "2026-09-23T13:43:11Z",
+          "completed_at": "2026-09-23T13:48:42Z"
+        },
+        {
+          "id": "anonymous_11",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-23T13:34:58Z",
+          "started_at": "2026-09-23T13:35:10Z",
+          "completed_at": "2026-09-23T13:42:24Z"
+        },
+        {
+          "id": "anonymous_12",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-23T10:56:38Z",
+          "started_at": "2026-09-23T10:57:14Z",
+          "completed_at": "2026-09-23T11:06:39Z"
+        },
+        {
+          "id": "anonymous_13",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-22T00:27:28Z",
+          "started_at": "2026-09-22T00:44:52Z",
+          "completed_at": "2026-09-22T08:31:53Z"
+        },
+        {
+          "id": "anonymous_14",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-22T00:27:28Z",
+          "started_at": "2026-09-22T00:35:50Z",
+          "completed_at": "2026-09-22T00:44:09Z"
+        },
+        {
+          "id": "anonymous_15",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-22T00:27:28Z",
+          "started_at": "2026-09-22T00:27:49Z",
+          "completed_at": "2026-09-22T00:35:23Z"
+        },
+        {
+          "id": "anonymous_16",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-08-03T00:04:35Z",
+          "started_at": "2026-08-03T00:04:36Z",
+          "completed_at": "2026-09-21T10:03:01Z"
+        },
+        {
+          "id": "anonymous_17",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-08-04T01:58:57Z",
+          "started_at": null,
+          "completed_at": "2026-09-21T10:03:01Z"
+        },
+        {
+          "id": "anonymous_18",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-08-04T01:58:57Z",
+          "started_at": "2026-08-04T01:59:17Z",
+          "completed_at": "2026-09-21T10:03:01Z"
+        },
+        {
+          "id": "anonymous_19",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-08-20T13:30:33Z",
+          "started_at": "2026-08-20T13:31:12Z",
+          "completed_at": "2026-09-21T10:03:01Z"
+        },
+        {
+          "id": "anonymous_20",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "anne",
+          "created_at": "2026-09-18T03:40:30Z",
+          "started_at": "2026-09-18T03:41:29Z",
+          "completed_at": "2026-09-21T10:03:01Z"
+        },
+        {
+          "id": "anonymous_21",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-19T04:57:53Z",
+          "started_at": "2026-09-19T04:58:26Z",
+          "completed_at": "2026-09-19T05:00:36Z"
+        },
+        {
+          "id": "anonymous_22",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-19T04:27:38Z",
+          "started_at": "2026-09-19T04:37:23Z",
+          "completed_at": "2026-09-19T04:46:32Z"
+        },
+        {
+          "id": "anonymous_23",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-19T04:27:38Z",
+          "started_at": "2026-09-19T04:28:21Z",
+          "completed_at": "2026-09-19T04:36:57Z"
+        },
+        {
+          "id": "anonymous_24",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-19T03:31:14Z",
+          "started_at": "2026-09-19T03:32:11Z",
+          "completed_at": "2026-09-19T03:35:09Z"
+        },
+        {
+          "id": "anonymous_25",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-19T03:08:47Z",
+          "started_at": "2026-09-19T03:10:07Z",
+          "completed_at": "2026-09-19T03:31:33Z"
+        },
+        {
+          "id": "anonymous_26",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-19T02:30:55Z",
+          "started_at": "2026-09-19T03:00:05Z",
+          "completed_at": "2026-09-19T03:09:26Z"
+        },
+        {
+          "id": "anonymous_27",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-19T02:30:55Z",
+          "started_at": "2026-09-19T02:31:00Z",
+          "completed_at": "2026-09-19T02:59:39Z"
+        },
+        {
+          "id": "anonymous_28",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "jarvis",
+          "created_at": "2026-09-17T03:28:49Z",
+          "started_at": "2026-09-19T00:47:24Z",
+          "completed_at": "2026-09-19T01:11:28Z"
+        },
+        {
+          "id": "anonymous_29",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-17T03:28:49Z",
+          "started_at": "2026-09-18T17:10:59Z",
+          "completed_at": "2026-09-19T00:46:56Z"
+        },
+        {
+          "id": "anonymous_30",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-17T03:28:48Z",
+          "started_at": "2026-09-17T03:29:03Z",
+          "completed_at": "2026-09-18T17:10:41Z"
+        },
+        {
+          "id": "anonymous_31",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-16T02:51:44Z",
+          "started_at": "2026-09-16T03:34:32Z",
+          "completed_at": "2026-09-16T03:47:54Z"
+        },
+        {
+          "id": "anonymous_32",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-16T02:51:27Z",
+          "started_at": "2026-09-16T02:54:19Z",
+          "completed_at": "2026-09-16T03:33:54Z"
+        },
+        {
+          "id": "anonymous_33",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-16T02:18:36Z",
+          "started_at": "2026-09-16T02:42:16Z",
+          "completed_at": "2026-09-16T02:54:00Z"
+        },
+        {
+          "id": "anonymous_34",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-16T02:18:18Z",
+          "started_at": "2026-09-16T02:24:12Z",
+          "completed_at": "2026-09-16T02:42:04Z"
+        },
+        {
+          "id": "anonymous_35",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-16T01:18:14Z",
+          "started_at": "2026-09-16T02:11:09Z",
+          "completed_at": "2026-09-16T02:23:15Z"
+        },
+        {
+          "id": "anonymous_36",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-16T01:17:53Z",
+          "started_at": "2026-09-16T01:21:56Z",
+          "completed_at": "2026-09-16T02:10:36Z"
+        },
+        {
+          "id": "anonymous_37",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-16T00:28:38Z",
+          "started_at": "2026-09-16T01:12:54Z",
+          "completed_at": "2026-09-16T01:20:56Z"
+        },
+        {
+          "id": "anonymous_38",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-16T00:28:23Z",
+          "started_at": "2026-09-16T00:31:41Z",
+          "completed_at": "2026-09-16T01:12:10Z"
+        },
+        {
+          "id": "anonymous_39",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-16T00:10:34Z",
+          "started_at": "2026-09-16T00:18:38Z",
+          "completed_at": "2026-09-16T00:30:49Z"
+        },
+        {
+          "id": "anonymous_40",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-16T00:10:24Z",
+          "started_at": "2026-09-16T00:10:37Z",
+          "completed_at": "2026-09-16T00:17:43Z"
+        },
+        {
+          "id": "anonymous_41",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "jarvis",
+          "created_at": "2026-09-15T15:36:54Z",
+          "started_at": "2026-09-15T16:02:08Z",
+          "completed_at": "2026-09-15T16:47:58Z"
+        },
+        {
+          "id": "anonymous_42",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-15T16:08:44Z",
+          "started_at": "2026-09-15T16:37:16Z",
+          "completed_at": "2026-09-15T16:41:34Z"
+        },
+        {
+          "id": "anonymous_43",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-15T16:08:33Z",
+          "started_at": "2026-09-15T16:09:10Z",
+          "completed_at": "2026-09-15T16:36:18Z"
+        },
+        {
+          "id": "anonymous_44",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-15T15:36:54Z",
+          "started_at": "2026-09-15T15:57:07Z",
+          "completed_at": "2026-09-15T16:01:17Z"
+        },
+        {
+          "id": "anonymous_45",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-15T15:36:54Z",
+          "started_at": "2026-09-15T15:37:04Z",
+          "completed_at": "2026-09-15T15:57:01Z"
+        },
+        {
+          "id": "anonymous_46",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-15T14:05:55Z",
+          "started_at": "2026-09-15T14:18:49Z",
+          "completed_at": "2026-09-15T14:22:17Z"
+        },
+        {
+          "id": "anonymous_47",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-15T14:05:32Z",
+          "started_at": "2026-09-15T14:05:47Z",
+          "completed_at": "2026-09-15T14:18:09Z"
+        },
+        {
+          "id": "anonymous_48",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-15T13:40:16Z",
+          "started_at": "2026-09-15T13:58:45Z",
+          "completed_at": "2026-09-15T14:03:38Z"
+        },
+        {
+          "id": "anonymous_49",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-15T13:40:06Z",
+          "started_at": "2026-09-15T13:47:43Z",
+          "completed_at": "2026-09-15T13:58:31Z"
+        },
+        {
+          "id": "anonymous_50",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "jarvis",
+          "created_at": "2026-09-15T13:18:33Z",
+          "started_at": "2026-09-15T13:39:42Z",
+          "completed_at": "2026-09-15T13:46:53Z"
+        },
+        {
+          "id": "anonymous_51",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-15T13:18:21Z",
+          "started_at": "2026-09-15T13:32:40Z",
+          "completed_at": "2026-09-15T13:38:55Z"
+        },
+        {
+          "id": "anonymous_52",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-15T13:18:07Z",
+          "started_at": "2026-09-15T13:18:38Z",
+          "completed_at": "2026-09-15T13:32:32Z"
+        },
+        {
+          "id": "anonymous_53",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-12T08:37:07Z",
+          "started_at": "2026-09-12T08:39:35Z",
+          "completed_at": "2026-09-12T08:41:42Z"
+        },
+        {
+          "id": "anonymous_54",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "anne",
+          "created_at": "2026-09-12T08:36:52Z",
+          "started_at": "2026-09-12T08:37:35Z",
+          "completed_at": "2026-09-12T08:39:21Z"
+        },
+        {
+          "id": "anonymous_55",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-12T08:32:21Z",
+          "started_at": "2026-09-12T08:32:34Z",
+          "completed_at": "2026-09-12T08:36:23Z"
+        },
+        {
+          "id": "anonymous_56",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-12T08:10:20Z",
+          "started_at": "2026-09-12T08:28:33Z",
+          "completed_at": "2026-09-12T08:31:33Z"
+        },
+        {
+          "id": "anonymous_57",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "anne",
+          "created_at": "2026-09-12T08:10:05Z",
+          "started_at": "2026-09-12T08:22:32Z",
+          "completed_at": "2026-09-12T08:27:52Z"
+        },
+        {
+          "id": "anonymous_58",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-12T08:09:50Z",
+          "started_at": "2026-09-12T08:19:31Z",
+          "completed_at": "2026-09-12T08:21:48Z"
+        },
+        {
+          "id": "anonymous_59",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "anne",
+          "created_at": "2026-09-12T08:09:32Z",
+          "started_at": "2026-09-12T08:10:30Z",
+          "completed_at": "2026-09-12T08:19:16Z"
+        },
+        {
+          "id": "anonymous_60",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-09-09T15:41:15Z",
+          "started_at": "2026-09-09T15:42:11Z",
+          "completed_at": "2026-09-09T15:48:26Z"
+        },
+        {
+          "id": "anonymous_61",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-09T12:21:13Z",
+          "started_at": "2026-09-09T12:21:34Z",
+          "completed_at": "2026-09-09T12:28:23Z"
+        },
+        {
+          "id": "anonymous_62",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-09T11:24:35Z",
+          "started_at": "2026-09-09T11:34:24Z",
+          "completed_at": "2026-09-09T11:37:22Z"
+        },
+        {
+          "id": "anonymous_63",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-09T11:24:11Z",
+          "started_at": "2026-09-09T11:24:23Z",
+          "completed_at": "2026-09-09T11:33:32Z"
+        },
+        {
+          "id": "anonymous_64",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-09-09T11:24:11Z",
+          "started_at": "2026-09-09T11:24:22Z",
+          "completed_at": "2026-09-09T11:28:31Z"
+        },
+        {
+          "id": "anonymous_65",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-08T23:55:13Z",
+          "started_at": "2026-09-09T00:48:36Z",
+          "completed_at": "2026-09-09T01:03:22Z"
+        },
+        {
+          "id": "anonymous_66",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-08T23:54:28Z",
+          "started_at": "2026-09-09T00:29:32Z",
+          "completed_at": "2026-09-09T00:47:52Z"
+        },
+        {
+          "id": "anonymous_67",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-09-08T23:53:55Z",
+          "started_at": "2026-09-09T00:19:30Z",
+          "completed_at": "2026-09-09T00:29:21Z"
+        },
+        {
+          "id": "anonymous_68",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-09-08T23:53:25Z",
+          "started_at": "2026-09-08T23:58:26Z",
+          "completed_at": "2026-09-09T00:18:41Z"
+        },
+        {
+          "id": "anonymous_69",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "rodi",
+          "created_at": "2026-09-08T23:51:21Z",
+          "started_at": "2026-09-08T23:51:25Z",
+          "completed_at": "2026-09-08T23:57:57Z"
+        },
+        {
+          "id": "anonymous_70",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-08T03:38:30Z",
+          "started_at": "2026-09-08T03:38:54Z",
+          "completed_at": "2026-09-08T03:47:38Z"
+        },
+        {
+          "id": "anonymous_71",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-09-07T05:31:42Z",
+          "started_at": "2026-09-07T05:32:20Z",
+          "completed_at": "2026-09-07T05:34:04Z"
+        },
+        {
+          "id": "anonymous_72",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-08-05T01:51:39Z",
+          "started_at": "2026-08-05T01:52:05Z",
+          "completed_at": "2026-08-05T01:56:45Z"
+        },
+        {
+          "id": "anonymous_73",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-08-04T23:48:03Z",
+          "started_at": "2026-08-04T23:48:53Z",
+          "completed_at": "2026-08-04T23:51:23Z"
+        },
+        {
+          "id": "anonymous_74",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-08-04T02:04:51Z",
+          "started_at": "2026-08-04T02:05:49Z",
+          "completed_at": "2026-08-04T02:14:19Z"
+        },
+        {
+          "id": "anonymous_75",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-08-04T02:04:51Z",
+          "started_at": "2026-08-04T02:05:49Z",
+          "completed_at": "2026-08-04T02:11:49Z"
+        },
+        {
+          "id": "anonymous_76",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-08-04T00:39:06Z",
+          "started_at": "2026-08-04T00:39:39Z",
+          "completed_at": "2026-08-04T00:42:54Z"
+        },
+        {
+          "id": "anonymous_77",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-08-04T00:39:06Z",
+          "started_at": "2026-08-04T00:39:39Z",
+          "completed_at": "2026-08-04T00:42:28Z"
+        },
+        {
+          "id": "anonymous_78",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-08-04T00:30:37Z",
+          "started_at": "2026-08-04T00:30:37Z",
+          "completed_at": "2026-08-04T00:35:17Z"
+        },
+        {
+          "id": "anonymous_79",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-08-04T00:30:37Z",
+          "started_at": "2026-08-04T00:30:37Z",
+          "completed_at": "2026-08-04T00:33:53Z"
+        },
+        {
+          "id": "anonymous_80",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-08-03T00:22:16Z",
+          "started_at": "2026-08-03T00:22:16Z",
+          "completed_at": "2026-08-03T00:30:02Z"
+        },
+        {
+          "id": "anonymous_81",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "rodi",
+          "created_at": "2026-08-03T00:22:15Z",
+          "started_at": null,
+          "completed_at": "2026-08-03T00:22:16Z"
+        },
+        {
+          "id": "anonymous_82",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-29T14:48:11Z",
+          "started_at": "2026-07-29T14:48:52Z",
+          "completed_at": "2026-07-29T14:50:56Z"
+        },
+        {
+          "id": "anonymous_83",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-29T14:42:45Z",
+          "started_at": "2026-07-29T14:42:51Z",
+          "completed_at": "2026-07-29T14:46:49Z"
+        },
+        {
+          "id": "anonymous_84",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-29T13:18:14Z",
+          "started_at": "2026-07-29T13:23:18Z",
+          "completed_at": "2026-07-29T13:25:01Z"
+        },
+        {
+          "id": "anonymous_85",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-29T13:18:14Z",
+          "started_at": "2026-07-29T13:18:17Z",
+          "completed_at": "2026-07-29T13:22:41Z"
+        },
+        {
+          "id": "anonymous_86",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "jarvis",
+          "created_at": "2026-07-29T13:18:14Z",
+          "started_at": "2026-07-29T13:18:17Z",
+          "completed_at": "2026-07-29T13:20:48Z"
+        },
+        {
+          "id": "anonymous_87",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-29T13:14:09Z",
+          "started_at": "2026-07-29T13:14:16Z",
+          "completed_at": "2026-07-29T13:15:45Z"
+        },
+        {
+          "id": "anonymous_88",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-28T05:11:49Z",
+          "started_at": "2026-07-28T05:25:28Z",
+          "completed_at": "2026-07-28T05:28:42Z"
+        },
+        {
+          "id": "anonymous_89",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-28T05:11:49Z",
+          "started_at": "2026-07-28T05:19:18Z",
+          "completed_at": "2026-07-28T05:25:20Z"
+        },
+        {
+          "id": "anonymous_90",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-28T05:11:49Z",
+          "started_at": "2026-07-28T05:17:09Z",
+          "completed_at": "2026-07-28T05:19:10Z"
+        },
+        {
+          "id": "anonymous_91",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-28T05:11:49Z",
+          "started_at": "2026-07-28T05:11:49Z",
+          "completed_at": "2026-07-28T05:17:06Z"
+        },
+        {
+          "id": "anonymous_92",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-28T04:28:28Z",
+          "started_at": "2026-07-28T05:06:16Z",
+          "completed_at": "2026-07-28T05:09:12Z"
+        },
+        {
+          "id": "anonymous_93",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-28T04:28:28Z",
+          "started_at": "2026-07-28T04:46:58Z",
+          "completed_at": "2026-07-28T05:06:02Z"
+        },
+        {
+          "id": "anonymous_94",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-28T04:50:17Z",
+          "started_at": "2026-07-28T04:55:33Z",
+          "completed_at": "2026-07-28T04:58:40Z"
+        },
+        {
+          "id": "anonymous_95",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-28T04:50:17Z",
+          "started_at": "2026-07-28T04:50:26Z",
+          "completed_at": "2026-07-28T04:55:19Z"
+        },
+        {
+          "id": "anonymous_96",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-28T04:28:28Z",
+          "started_at": "2026-07-28T04:43:24Z",
+          "completed_at": "2026-07-28T04:46:43Z"
+        },
+        {
+          "id": "anonymous_97",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-28T04:28:28Z",
+          "started_at": "2026-07-28T04:28:32Z",
+          "completed_at": "2026-07-28T04:43:23Z"
+        },
+        {
+          "id": "anonymous_98",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-28T04:19:08Z",
+          "started_at": "2026-07-28T04:19:22Z",
+          "completed_at": "2026-07-28T04:23:40Z"
+        },
+        {
+          "id": "anonymous_99",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-28T00:13:13Z",
+          "started_at": "2026-07-28T00:40:58Z",
+          "completed_at": "2026-07-28T00:46:09Z"
+        },
+        {
+          "id": "anonymous_100",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "anne",
+          "created_at": "2026-07-28T00:13:13Z",
+          "started_at": "2026-07-28T00:28:02Z",
+          "completed_at": "2026-07-28T00:40:53Z"
+        },
+        {
+          "id": "anonymous_101",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-28T00:13:12Z",
+          "started_at": "2026-07-28T00:23:01Z",
+          "completed_at": "2026-07-28T00:27:33Z"
+        },
+        {
+          "id": "anonymous_102",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-07-28T00:13:12Z",
+          "started_at": "2026-07-28T00:14:00Z",
+          "completed_at": "2026-07-28T00:22:19Z"
+        },
+        {
+          "id": "anonymous_103",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "anne",
+          "created_at": "2026-07-27T16:35:30Z",
+          "started_at": "2026-07-27T16:35:54Z",
+          "completed_at": "2026-07-27T16:36:38Z"
+        },
+        {
+          "id": "anonymous_104",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-27T16:35:30Z",
+          "started_at": "2026-07-27T16:35:54Z",
+          "completed_at": "2026-07-27T16:36:30Z"
+        },
+        {
+          "id": "anonymous_105",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "jarvis",
+          "created_at": "2026-07-27T16:35:30Z",
+          "started_at": "2026-07-27T16:35:54Z",
+          "completed_at": "2026-07-27T16:36:27Z"
+        },
+        {
+          "id": "anonymous_106",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-07-27T16:35:30Z",
+          "started_at": "2026-07-27T16:35:54Z",
+          "completed_at": "2026-07-27T16:36:24Z"
+        },
+        {
+          "id": "anonymous_107",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-27T16:35:30Z",
+          "started_at": "2026-07-27T16:35:54Z",
+          "completed_at": "2026-07-27T16:36:20Z"
+        },
+        {
+          "id": "anonymous_108",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-27T15:54:31Z",
+          "started_at": "2026-07-27T16:07:53Z",
+          "completed_at": "2026-07-27T16:11:50Z"
+        },
+        {
+          "id": "anonymous_109",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "anne",
+          "created_at": "2026-07-27T16:10:27Z",
+          "started_at": "2026-07-27T16:10:54Z",
+          "completed_at": "2026-07-27T16:11:32Z"
+        },
+        {
+          "id": "anonymous_110",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-07-27T16:10:27Z",
+          "started_at": "2026-07-27T16:10:54Z",
+          "completed_at": "2026-07-27T16:11:11Z"
+        },
+        {
+          "id": "anonymous_111",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "jarvis",
+          "created_at": "2026-07-27T16:10:27Z",
+          "started_at": "2026-07-27T16:10:54Z",
+          "completed_at": "2026-07-27T16:11:10Z"
+        },
+        {
+          "id": "anonymous_112",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-27T16:10:27Z",
+          "started_at": "2026-07-27T16:10:54Z",
+          "completed_at": "2026-07-27T16:11:10Z"
+        },
+        {
+          "id": "anonymous_113",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "ludwig",
+          "created_at": "2026-07-27T16:10:27Z",
+          "started_at": "2026-07-27T16:10:54Z",
+          "completed_at": "2026-07-27T16:11:08Z"
+        },
+        {
+          "id": "anonymous_114",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-07-27T15:54:31Z",
+          "started_at": "2026-07-27T16:00:53Z",
+          "completed_at": "2026-07-27T16:07:13Z"
+        },
+        {
+          "id": "anonymous_115",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-07-27T15:54:31Z",
+          "started_at": "2026-07-27T15:54:52Z",
+          "completed_at": "2026-07-27T16:00:10Z"
+        },
+        {
+          "id": "anonymous_116",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "argos",
+          "created_at": "2026-07-24T03:00:07Z",
+          "started_at": "2026-07-24T03:00:07Z",
+          "completed_at": "2026-07-24T03:09:24Z"
+        },
+        {
+          "id": "anonymous_117",
+          "title": "[redacted]",
+          "status": "done",
+          "assignee": "yul",
+          "created_at": "2026-06-30T16:38:20Z",
+          "started_at": "2026-06-30T16:38:26Z",
+          "completed_at": "2026-06-30T16:39:08Z"
+        }
+      ],
+      "resident": {
+        "overall_activity": "unknown",
+        "running_board_count": 0
+      }
+    },
+    "resident": {
+      "overall_activity": "unknown",
+      "running_board_count": 0
+    }
+  },
+  "/api/v1/jobs?profile=default": {
+    "source": "dashboard",
+    "status": "ok",
+    "observed_at": "2026-09-25T13:33:42.400258Z",
+    "last_success_at": "2026-09-25T13:33:42.400258Z",
+    "expires_at": "2026-09-25T13:33:57.400261Z",
+    "stale": false,
+    "error": null,
+    "data": {
+      "profile": "default",
+      "count": 1,
+      "jobs": [
+        {
+          "id": "anonymous_118",
+          "profile": "default",
+          "enabled": true,
+          "schedule_display": "30 4 * * 0",
+          "last_run_at": "2026-09-19T19:32:50.392838Z",
+          "next_run_at": "2026-09-26T19:30:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        }
+      ],
+      "registry": {
+        "default": 1,
+        "rodi": null,
+        "jarvis": null,
+        "yul": null,
+        "ludwig": null,
+        "anne": null,
+        "argos": null
+      }
+    }
+  },
+  "/api/v1/jobs?profile=rodi": {
+    "source": "dashboard",
+    "status": "ok",
+    "observed_at": "2026-09-25T13:33:42.404140Z",
+    "last_success_at": "2026-09-25T13:33:42.404140Z",
+    "expires_at": "2026-09-25T13:33:57.404143Z",
+    "stale": false,
+    "error": null,
+    "data": {
+      "profile": "rodi",
+      "count": 1,
+      "jobs": [
+        {
+          "id": "anonymous_119",
+          "profile": "rodi",
+          "enabled": true,
+          "schedule_display": "0 9 * * 1",
+          "last_run_at": "2026-09-21T00:02:08.385582Z",
+          "next_run_at": "2026-09-28T00:00:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        }
+      ],
+      "registry": {
+        "default": 1,
+        "rodi": 1,
+        "jarvis": null,
+        "yul": null,
+        "ludwig": null,
+        "anne": null,
+        "argos": null
+      }
+    }
+  },
+  "/api/v1/jobs?profile=jarvis": {
+    "source": "dashboard",
+    "status": "ok",
+    "observed_at": "2026-09-25T13:33:42.408492Z",
+    "last_success_at": "2026-09-25T13:33:42.408492Z",
+    "expires_at": "2026-09-25T13:33:57.408495Z",
+    "stale": false,
+    "error": null,
+    "data": {
+      "profile": "jarvis",
+      "count": 7,
+      "jobs": [
+        {
+          "id": "anonymous_120",
+          "profile": "jarvis",
+          "enabled": true,
+          "schedule_display": "0 8 * * *",
+          "last_run_at": "2026-09-24T23:01:12.653504Z",
+          "next_run_at": "2026-09-25T23:00:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        },
+        {
+          "id": "anonymous_121",
+          "profile": "jarvis",
+          "enabled": true,
+          "schedule_display": "50 7 * * *",
+          "last_run_at": "2026-09-24T22:51:02.073597Z",
+          "next_run_at": "2026-09-25T22:50:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        },
+        {
+          "id": "anonymous_122",
+          "profile": "jarvis",
+          "enabled": true,
+          "schedule_display": "10 8 * * *",
+          "last_run_at": "2026-09-24T23:11:11.673867Z",
+          "next_run_at": "2026-09-25T23:10:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        },
+        {
+          "id": "anonymous_123",
+          "profile": "jarvis",
+          "enabled": true,
+          "schedule_display": "12 8 * * *",
+          "last_run_at": "2026-09-24T23:12:57.881510Z",
+          "next_run_at": "2026-09-25T23:12:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        },
+        {
+          "id": "anonymous_124",
+          "profile": "jarvis",
+          "enabled": true,
+          "schedule_display": "55 7 * * *",
+          "last_run_at": "2026-09-24T22:55:59.132983Z",
+          "next_run_at": "2026-09-25T22:55:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        },
+        {
+          "id": "anonymous_125",
+          "profile": "jarvis",
+          "enabled": true,
+          "schedule_display": "55 11 * * *",
+          "last_run_at": "2026-09-25T02:58:28.022039Z",
+          "next_run_at": "2026-09-26T02:55:00Z",
+          "last_status": "ok",
+          "error": {
+            "present": false
+          }
+        },
+        {
+          "id": "anonymous_126",
+          "profile": "jarvis",
+          "enabled": true,
+          "schedule_display": "10 12 * * *",
+          "last_run_at": "2026-09-25T03:10:57.286034Z",
+          "next_run_at": "2026-09-26T03:10:00Z",
+          "last_status": "error",
+          "error": {
+            "present": true
+          }
+        }
+      ],
+      "registry": {
+        "default": 1,
+        "rodi": 1,
+        "jarvis": 7,
+        "yul": null,
+        "ludwig": null,
+        "anne": null,
+        "argos": null
+      }
+    }
+  },
+  "/api/v1/results/rodi": {
+    "source": "dashboard",
+    "status": "ok",
+    "observed_at": "2026-09-25T13:33:42.418120Z",
+    "last_success_at": "2026-09-25T13:33:42.418120Z",
+    "expires_at": "2026-09-25T13:33:57.418122Z",
+    "stale": false,
+    "error": null,
+    "data": {
+      "profile": "rodi",
+      "task_status": "done",
+      "latest_summary": "[redacted]",
+      "run": {
+        "profile": "rodi",
+        "status": "done",
+        "summary": "[redacted]",
+        "started_at": "2026-09-08T23:51:25Z",
+        "completed_at": "2026-09-08T23:57:57Z"
+      },
+      "attachments": [],
+      "attachments_status": "unavailable"
+    }
+  }
+}

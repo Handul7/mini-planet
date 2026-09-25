@@ -24,6 +24,7 @@ import {
   makeStreetEdges,
 } from './world/harbor-kit.js?v=114';
 import { createAgentStatusSource } from './status-source.js?v=70';
+import { initOwnerWorkspace } from './owner-workspace.js';
 import { createSkySystem } from './sky.js?v=114';
 import { prepareSeasonalGround } from './seasonal-surfaces.js?v=114';
 import { createAmbientAudio } from './ambient-audio.js?v=104';
@@ -52,6 +53,10 @@ import {
 } from './agent-results.js?v=60';
 
 const URL_PARAMS = new URLSearchParams(location.search);
+// A view selector, never authentication. The same-origin host verifies sessions.
+const OWNER_MODE = URL_PARAMS.get('owner') === '1';
+let ownerWorkspace = null;
+if (OWNER_MODE) document.body.classList.add('owner-runtime');
 const villageBoard = await createVillageBoard();
 const DEV_TIME_SHIFT_MS = URL_PARAMS.has('dev')
   ? Number(URL_PARAMS.get('timeShiftHours') || 0) * 3600000
@@ -167,13 +172,16 @@ try {
   };
 } catch (_) { /* optional until the Hermes bridge is enabled */ }
 
+if (OWNER_MODE) {
+  RUNTIME_CONFIG.publication = { mode: 'static-demo', label: '개인용 조회', notice: '로그인 후 업무와 일정을 확인합니다. 주민의 전체 활동은 미확인입니다.' };
+}
 const introDisclosure = document.getElementById('introDisclosure');
 if (introDisclosure) {
   const publication = RUNTIME_CONFIG.publication || {};
   introDisclosure.textContent = [publication.label, publication.notice].filter(Boolean).join(' · ');
 }
 try {
-  const resultCfg = await fetchJSON(RUNTIME_CONFIG.results.snapshotUrl || 'agent-results.json');
+  const resultCfg = OWNER_MODE ? {} : await fetchJSON(RUNTIME_CONFIG.results.snapshotUrl || 'agent-results.json');
   const collections = resultCfg?.agents && typeof resultCfg.agents === 'object'
     ? resultCfg.agents
     : resultCfg;
@@ -6435,8 +6443,8 @@ const AGENTS = AGENT_CONFIG.map((a) => ({
   },
   lines: Array.isArray(a.lines) && a.lines.length ? a.lines : ['…'],
   status: {
-    state: a.defaultStatus?.state || '대기 중',
-    task: a.defaultStatus?.task || '',
+    state: OWNER_MODE ? '상태 미확인' : (a.defaultStatus?.state || '대기 중'),
+    task: OWNER_MODE ? '업무 기록은 개인 작업실에서 확인하세요.' : (a.defaultStatus?.task || ''),
     updatedAt: null,
     progress: null,
     result: null,
@@ -6462,6 +6470,7 @@ let resultRefreshInFlight = null;
 let opsBeaconFleetSummary = null;
 
 async function refreshPublicResults() {
+  if (OWNER_MODE) { await ownerWorkspace?.refresh(); return false; }
   if (resultRefreshInFlight) return resultRefreshInFlight;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
@@ -9071,6 +9080,14 @@ addEventListener('keydown', anyKeyStart);
 // agent-status.json(같은 폴더)을 주기적으로 읽어 갱신하므로, 그 파일만
 // 바꾸면 실시간 대시보드로 동작한다.
 // ===========================================================================
+if (OWNER_MODE) {
+  ownerWorkspace = initOwnerWorkspace({
+    preview: URL_PARAMS.get('ownerPreview') === '1',
+    onOpen() { dashboardStopPatrol(); dashboardCloseCard(); dashboardCloseTeam(); closeServicePanel(); closeVisitorPanels(); },
+  });
+  document.getElementById('startBtn')?.addEventListener('click', () => ownerWorkspace.open());
+}
+
 (function wireAgentDashboard() {
   const cardEl = document.getElementById('agentCard');
   const barEl = document.getElementById('agentbar');
@@ -9152,6 +9169,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   function openTeamOverview() {
+    if (OWNER_MODE) { ownerWorkspace.open({ tab: 'board' }); return; }
     if (!teamPanelEl) return;
     dashboardStopPatrol();
     closeVisitorPanels();
@@ -9503,6 +9521,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   function openAgentCard(a, { focus = true } = {}) {
+    if (OWNER_MODE) { ownerWorkspace.open({ tab: 'board', agent: a.key }); return; }
     closeVisitorPanels();
     closeTeamOverview();
     markVisitorStep('agent');
@@ -10092,7 +10111,7 @@ addEventListener('keydown', anyKeyStart);
   }
   renderTeamOverview();
   refreshRecentResultsUi();
-  statusSource = createAgentStatusSource({
+  statusSource = OWNER_MODE ? null : createAgentStatusSource({
     config: RUNTIME_CONFIG.status,
     onSnapshot: applyAgentStatus,
     onConnectionChange(state) {
@@ -10102,7 +10121,9 @@ addEventListener('keydown', anyKeyStart);
       renderTeamOverview();
     },
   });
+  if (OWNER_MODE) { renderConnectionBadge(); renderStatusFreshness(); }
   refreshBtn?.addEventListener('click', async () => {
+    if (OWNER_MODE) { ownerWorkspace.open(); return; }
     if (refreshBtn.classList.contains('refreshing')) return;
     refreshBtn.classList.add('refreshing');
     refreshBtn.disabled = true;
@@ -10244,6 +10265,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   openServicePanel = function (a, { tab = 'service' } = {}) {
+    if (OWNER_MODE) { ownerWorkspace.open({ tab: a.key === 'rodi' ? 'results' : a.key === 'jarvis' ? 'jobs' : 'board', agent: a.key }); return; }
     ambientAudio.playEffect('open');
     dashboardStopPatrol();
     closeVisitorPanels();

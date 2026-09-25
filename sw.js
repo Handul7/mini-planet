@@ -1,7 +1,8 @@
 // Service worker — caches the complete local app shell for offline / fast repeat loads.
 // Same-origin code is network-first so releases do not stick.
 const CACHE_PREFIX = 'handul-planet-';
-const CACHE = CACHE_PREFIX + 'v119';
+// Keep the public release version while invalidating caches from before owner mode.
+const CACHE = CACHE_PREFIX + 'v119' + '-owner-1';
 const SHELL = [
   './',
   './index.html',
@@ -25,6 +26,10 @@ const SHELL = [
   './assets/papercut/contours.js?v=97',
   './src/status-source.js?v=70',
   './src/public-dashboard.js?v=70',
+  './src/owner-data.js',
+  './src/owner-client.js',
+  './src/owner-workspace.js',
+  './src/owner-workspace.css',
   './src/release-quality.js?v=76',
   './src/sky.js?v=114',
   './src/climate-model.js?v=114',
@@ -66,6 +71,24 @@ const SHELL = [
   './agent-results.json',
 ];
 
+function isPrivateRequest(request) {
+  if (request.headers.has('Authorization')) return true;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return false;
+  let path;
+  try {
+    path = decodeURIComponent(url.pathname).replace(/\/+/g, '/');
+  } catch (_) {
+    // A malformed path must not become an offline cache entry.
+    return true;
+  }
+  const privatePath = /^\/(?:api|owner|auth|login|logout|session)(?:\/|$)/i;
+  if (privatePath.test(path)) return true;
+  // Also protect a deployment mounted below /, such as /mini-planet/owner/.
+  const scope = new URL(self.registration.scope).pathname;
+  return path.startsWith(scope) && privatePath.test('/' + path.slice(scope.length));
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())
@@ -77,10 +100,14 @@ self.addEventListener('activate', (event) => {
     caches.keys()
       // only touch OUR caches — Cache Storage is origin-wide, and on shared
       // hosts (e.g. username.github.io) other apps' caches live beside ours
-      .then((keys) => Promise.all(
-        keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE)
-            .map((k) => caches.delete(k))
-      ))
+      .then((keys) => Promise.all(keys.filter((key) => key.startsWith(CACHE_PREFIX)).map(async (key) => {
+        if (key !== CACHE) return caches.delete(key);
+        // Clean the current cache too: an interrupted upgrade or an older worker
+        // may have populated it before the private-route boundary took effect.
+        const cache = await caches.open(key);
+        const requests = await cache.keys();
+        await Promise.all(requests.filter(isPrivateRequest).map((request) => cache.delete(request)));
+      })))
       .then(() => self.clients.claim())
   );
 });
@@ -89,6 +116,12 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
   if (request.method !== 'GET') return;
+  if (isPrivateRequest(request)) {
+    // No Cache Storage read/write, HTTP cache reuse, or offline fallback for
+    // private responses, including when an old cache still contains that URL.
+    event.respondWith(fetch(request, { cache: 'no-store' }));
+    return;
+  }
   // ?dev=... assets intentionally bypass every cache, including an older
   // service worker that still controls the current tab.
   if (url.searchParams.has('dev')) return;
