@@ -34,6 +34,7 @@ import { createAgentSeparation } from './agent-separation.js?v=115';
 import { signatureForAgent } from './agent-signatures.js?v=72';
 import { readGamepadControls, createOrbitGesture, bindVirtualJoystick, wheelPixels } from './input-controls.js?v=119';
 import { selectNearbyInteraction } from './nearby-interaction.js';
+import { makeFootbridge } from './world/footbridge.js';
 import {
   cleanPublicText,
   evaluateSnapshotFreshness,
@@ -3397,6 +3398,20 @@ const PATH_DEFS = {
       };
     },
   },
+  footbridge: {
+    label: '바다 보행교',
+    build(points) {
+      const mesh = makeFootbridge(points, {
+        radius: R, terrainRadius, materialFactory: toonMat, splineDirs,
+        makeSurfaceRibbon, offsetSurfaceDir, placeOnSphereFacing, batchStaticMeshTree,
+      });
+      // The water exception follows the visible deck, including both ramps.
+      const walkZones = registerPathZones(
+        splineDirs(points, { step: 0.025 }).dirs, 0.055, 'footbridge-walk', 0.025, registerBridgeZone
+      );
+      return { mesh, zones: [], walkZones };
+    },
+  },
   deck: {
     label: '어시장 나무 데크',
     build(points) {
@@ -4018,6 +4033,7 @@ function loadSavedLayout() {
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '111', migrateVillageFrontage);
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '116', migrateVillageBalance);
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '117', migrateVillageSimplicity);
+    clean = migrateSavedComposition(clean, JSON.stringify(clean), 'owner-bridge-1', migrateYulFootbridge);
     return clean.filter((entry) => !isRetiredOceanTrail(entry));
   } catch (e) { /* corrupt -> fall back to default */ }
   return null;
@@ -5114,7 +5130,41 @@ function migrateVillageSimplicity(layout) {
   return layout.filter((p) => !retired.has(p));
 }
 
-const DEFAULT_LAYOUT = migrateVillageSimplicity(VILLAGE_BALANCED_LAYOUT);
+const VILLAGE_SIMPLE_LAYOUT = migrateVillageSimplicity(VILLAGE_BALANCED_LAYOUT);
+
+// One continuous pedestrian connection from the southern garden to the east
+// harbor. Its ends join existing paths; the bridge never changes the sea mask.
+const YUL_FOOTBRIDGE_POINTS = [
+  [0.2095903325, -0.9348785590, 0.2864855537],
+  [0.4130152859, -0.7473519700, 0.5204646065],
+  [0.84, -0.28, 0.46],
+  [0.90, 0.15, 0.38],
+  [0.6608928, 0.3905276, 0.6408658],
+];
+
+function migrateYulFootbridge(layout) {
+  if (layout.some((entry) => entry.id === 'yul.footbridge')) return layout;
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const dir = (entry) => entry.n ? unit(entry.n) : mapDir(entry.x, entry.z);
+  const home = layout.find((entry) => entry.ownerKey === 'yul' && entry.type === 'cottage');
+  const originalHome = VILLAGE_SIMPLE_LAYOUT.find((entry) => entry.ownerKey === 'yul');
+  if (!home || dir(home).angleTo(dir(originalHome)) > 0.003
+      || Math.abs(wrappedAngle((home.yaw || 0) - originalHome.yaw)) > 0.003) return layout;
+  const requiredPaths = VILLAGE_SIMPLE_LAYOUT.filter((entry) => entry.id === 'south.garden-loop'
+    || (entry.type === 'road' && normalizePathDirs(entry).some((point) => point.angleTo(unit(YUL_FOOTBRIDGE_POINTS.at(-1))) < 0.003)));
+  const samePath = (entry, original) => {
+    if (entry.kind !== 'path' || entry.type !== original.type) return false;
+    const actual = normalizePathDirs(entry), expected = normalizePathDirs(original);
+    return actual.length === expected.length && actual.every((point, i) => point.angleTo(expected[i]) < 0.003);
+  };
+  // Saved user edits stay intact. A moved destination or approach needs a
+  // route chosen for that arrangement instead of reintroducing stock paths.
+  if (requiredPaths.length !== 2 || requiredPaths.some((path) => !layout.some((entry) => samePath(entry, path)))) return layout;
+  return [...layout, { kind: 'path', type: 'footbridge', id: 'yul.footbridge', districtId: 'yul',
+    n: YUL_FOOTBRIDGE_POINTS.map((point) => unit(point).toArray()) }];
+}
+
+const DEFAULT_LAYOUT = migrateYulFootbridge(VILLAGE_SIMPLE_LAYOUT);
 
 // Home driveways are terrain tied to each service-home spot — regenerated
 // whenever the layout changes, so they follow the houses around in edit mode.
@@ -8856,7 +8906,7 @@ addEventListener('keydown', anyKeyStart);
   const PATH_NAMES = {
     road: '🛣️ 도로', lane: '🧱 마을 골목', river: '🌊 물길', trail: '🛤️ 흙길',
     snow: '❄️ 눈길', pond: '🏞️ 연못', sand: '🏖️ 모래밭', grass: '🌿 풀밭',
-    island: '🏝️ 섬', sea: '🌐 바다', deck: '▦ 데크', market: '⚑ 어시장',
+    island: '🏝️ 섬', sea: '🌐 바다', deck: '▦ 데크', footbridge: '🌉 바다 보행교', market: '⚑ 어시장',
     breakwater: '▰ 방파제', wave: '≋ 파도', camellia: '✿ 동백길',
     streetEdge: '▱ 도로 연석', laneEdge: '▱ 골목 연석', hedge: '♧ 생울타리',
     quayRail: '⌇ 부두 난간', courtyard: '▦ 건물 앞마당',
@@ -10489,6 +10539,18 @@ if (URL_PARAMS.has('dev')) {
       playerForward.copy(dir).addScaledVector(playerDir, -dir.dot(playerDir)).normalize();
       camDir.copy(playerForward);
     });
+  } else if (URL_PARAMS.get('qaView') === 'footbridge') {
+    queueMicrotask(() => {
+      const bridge = editablePaths.find((path) => path.data.id === 'yul.footbridge');
+      if (!bridge) return;
+      const points = bridge.data.dirs;
+      beginGame('explore', { cinematic: false });
+      const start = points[0], next = points[1];
+      const forward = next.clone().addScaledVector(start, -next.dot(start)).normalize();
+      commitPlayerSurfaceDirection(offsetSurfaceDir(start, forward, -0.045));
+      playerForward.copy(forward); keepTangentAtPlayer(playerForward);
+      camDir.copy(playerForward);
+    });
   }
   if (URL_PARAMS.get('qaView') === 'place') {
     queueMicrotask(() => {
@@ -11124,6 +11186,38 @@ if (URL_PARAMS.has('dev')) {
       const p = document.getElementById('enterPrompt');
       return { editMode, cls: p.className, text: p.textContent };
     },
+    testYulFootbridge() {
+      const bridge = editablePaths.find((path) => path.data.id === 'yul.footbridge');
+      const home = AGENTS.find((agent) => agent.key === 'yul')?.home;
+      if (!bridge || !home || activeBoatItem) return { pass: false, reason: 'missing-footbridge-or-home' };
+      const original = { player: playerDir.clone(), forward: playerForward.clone(), camera: camDir.clone(),
+        safe: lastSafePlayerDir.clone(), mode: experienceMode, blocked: playerBlockedFor };
+      const allowed = (dir) => playerSurfaceAllowed(dir, false) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS);
+      const walk = (points) => walkSurfaceRoute(points, {
+        getPosition: () => playerDir, move: tryMovePlayerOnSurface, allowed,
+      });
+      const samples = splineDirs(bridge.data.dirs, { step: 0.025 }).dirs;
+      try {
+        experienceMode = 'explore';
+        commitPlayerSurfaceDirection(samples[0]);
+        const crossing = walk(samples);
+        const door = homeDoorDir(home);
+        const entrance = offsetSurfaceDir(door, propFacing(home.dir, home.data.yaw || 0), 0.04);
+        const approach = crossing.pass ? findSurfaceRoute(playerDir, entrance, allowed) : null;
+        const toHome = approach ? walk(approach) : null;
+        const reachedDoor = !!toHome?.pass && playerDir.angleTo(door) < 0.18;
+        const back = reachedDoor ? walk([...approach].reverse().concat([...samples].reverse())) : null;
+        const waterSamples = samples.filter(isWaterSurfaceDir).length;
+        return { crossing, toHome, reachedDoor, back, waterSamples,
+          length: +(samples.slice(1).reduce((sum, dir, i) => sum + dir.angleTo(samples[i]) * R, 0)).toFixed(2),
+          pass: crossing.pass && reachedDoor && !!back?.pass && waterSamples > 0
+            && playerDir.angleTo(samples[0]) < 0.01 };
+      } finally {
+        playerDir.copy(original.player); playerForward.copy(original.forward); camDir.copy(original.camera);
+        lastSafePlayerDir.copy(original.safe); experienceMode = original.mode; playerBlockedFor = original.blocked;
+        updateServiceProximity();
+      }
+    },
     testHomeWalks() {
       if (activeBoatItem) return { pass: false, reason: 'already-aboard', homes: [] };
       const original = { player: playerDir.clone(), forward: playerForward.clone(), camera: camDir.clone(),
@@ -11212,10 +11306,16 @@ if (URL_PARAMS.has('dev')) {
     },
   };
   if (URL_PARAMS.get('qa') === '1') {
-    queueMicrotask(() => {
+    queueMicrotask(async () => {
+      // Interaction prompts are intentionally disabled behind the intro.
+      // Run their QA after the same transition a player uses to enter town.
+      if (intro.isConnected) beginGame('explore', { cinematic: false });
+      while (intro.isConnected) await new Promise(requestAnimationFrame);
       const homes = window.devPlanet.testAllHomes();
       const homeWalks = window.devPlanet.testHomeWalks();
       document.documentElement.dataset.qaHomeWalks = JSON.stringify(homeWalks);
+      const yulFootbridge = window.devPlanet.testYulFootbridge();
+      document.documentElement.dataset.qaYulFootbridge = JSON.stringify(yulFootbridge);
       const coverage = window.devPlanet.terrainCoverage();
       const waterAccess = window.devPlanet.waterAccessState();
       const boatLifecycle = window.devPlanet.testBoatLifecycle();
@@ -11271,6 +11371,7 @@ if (URL_PARAMS.has('dev')) {
       document.documentElement.dataset.qaRecovery = JSON.stringify(window.devPlanet.testPlayerRecovery());
       document.documentElement.dataset.qaReady = homes.every((item) => item.ok)
         && homeWalks.pass
+        && yulFootbridge.pass
         && window.devPlanet.layoutAudit().status === 'ready'
         && window.devPlanet.townWalkability().pass
         && coverage.waterPercent >= 34
