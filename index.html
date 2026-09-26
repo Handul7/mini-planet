@@ -49,6 +49,7 @@
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" sizes="180x180" />
 <link rel="manifest" href="manifest.json" />
 <link id="appStyles" rel="stylesheet" href="src/style.css?v=119" />
+<link rel="stylesheet" href="src/owner-workspace.css" />
 </head>
 <body class="intro-active">
 <div id="app"></div>
@@ -90,7 +91,7 @@
     </div>
   </div>
   <div class="help card">
-    <kbd>WASD / ↑↓←→</kbd> 이동<span class="sep">·</span><kbd>Space</kbd> 점프<span class="sep">·</span><kbd>F</kbd> 입장<span class="sep">·</span>드래그 시점<span class="sep">·</span><kbd>휠</kbd> 줌
+    <kbd>WASD / ↑↓←→</kbd> 이동<span class="sep">·</span><kbd>Space</kbd> 점프<span class="sep">·</span><kbd>F</kbd> 말 걸기 / 입장<span class="sep">·</span>드래그 시점<span class="sep">·</span><kbd>휠</kbd> 줌
   </div>
 
   <!-- compact weather + local time chip (top-right) -->
@@ -168,7 +169,7 @@
     <button data-e="🎉" aria-label="축하하기">🎉</button>
   </div>
   <div class="mobile-actions" id="mobileActions" aria-label="탐험 동작">
-    <button id="mobileInteractBtn" type="button" aria-label="가까운 집 입장" title="가까운 집 입장" disabled>
+    <button id="mobileInteractBtn" type="button" aria-label="가까운 주민·집·배 이용" title="가까운 주민·집·배 이용" disabled>
       <span aria-hidden="true">⌂</span>
     </button>
     <button id="mobileRecoverBtn" type="button" aria-label="가까운 안전 지점으로 이동" title="가까운 안전 지점으로 이동">

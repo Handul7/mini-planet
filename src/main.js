@@ -24,6 +24,8 @@ import {
   makeStreetEdges,
 } from './world/harbor-kit.js?v=114';
 import { createAgentStatusSource } from './status-source.js?v=70';
+import { initOwnerWorkspace } from './owner-workspace.js';
+import { projectOwnerVillage } from './owner-village.js';
 import { createSkySystem } from './sky.js?v=114';
 import { prepareSeasonalGround } from './seasonal-surfaces.js?v=114';
 import { createAmbientAudio } from './ambient-audio.js?v=104';
@@ -32,6 +34,8 @@ import { createPerformanceGovernor } from './performance.js?v=119';
 import { createAgentSeparation } from './agent-separation.js?v=115';
 import { signatureForAgent } from './agent-signatures.js?v=72';
 import { readGamepadControls, createOrbitGesture, bindVirtualJoystick, wheelPixels } from './input-controls.js?v=119';
+import { selectNearbyInteraction } from './nearby-interaction.js';
+import { makeFootbridge } from './world/footbridge.js';
 import {
   cleanPublicText,
   evaluateSnapshotFreshness,
@@ -52,6 +56,12 @@ import {
 } from './agent-results.js?v=60';
 
 const URL_PARAMS = new URLSearchParams(location.search);
+// A view selector, never authentication. The same-origin host verifies sessions.
+const OWNER_MODE = URL_PARAMS.get('owner') === '1';
+let ownerWorkspace = null;
+let ownerSnapshot = null;
+let ownerStateChanged = () => {};
+if (OWNER_MODE) document.body.classList.add('owner-runtime');
 const villageBoard = await createVillageBoard();
 const DEV_TIME_SHIFT_MS = URL_PARAMS.has('dev')
   ? Number(URL_PARAMS.get('timeShiftHours') || 0) * 3600000
@@ -167,13 +177,16 @@ try {
   };
 } catch (_) { /* optional until the Hermes bridge is enabled */ }
 
+if (OWNER_MODE) {
+  RUNTIME_CONFIG.publication = { mode: 'static-demo', label: '개인용 조회', notice: '로그인 후 업무와 일정을 확인합니다. 주민의 전체 활동은 미확인입니다.' };
+}
 const introDisclosure = document.getElementById('introDisclosure');
 if (introDisclosure) {
   const publication = RUNTIME_CONFIG.publication || {};
   introDisclosure.textContent = [publication.label, publication.notice].filter(Boolean).join(' · ');
 }
 try {
-  const resultCfg = await fetchJSON(RUNTIME_CONFIG.results.snapshotUrl || 'agent-results.json');
+  const resultCfg = OWNER_MODE ? {} : await fetchJSON(RUNTIME_CONFIG.results.snapshotUrl || 'agent-results.json');
   const collections = resultCfg?.agents && typeof resultCfg.agents === 'object'
     ? resultCfg.agents
     : resultCfg;
@@ -3388,6 +3401,20 @@ const PATH_DEFS = {
       };
     },
   },
+  footbridge: {
+    label: '바다 보행교',
+    build(points) {
+      const mesh = makeFootbridge(points, {
+        radius: R, terrainRadius, materialFactory: toonMat, splineDirs,
+        makeSurfaceRibbon, offsetSurfaceDir, placeOnSphereFacing, batchStaticMeshTree,
+      });
+      // The water exception follows the visible deck, including both ramps.
+      const walkZones = registerPathZones(
+        splineDirs(points, { step: 0.025 }).dirs, 0.055, 'footbridge-walk', 0.025, registerBridgeZone
+      );
+      return { mesh, zones: [], walkZones };
+    },
+  },
   deck: {
     label: '어시장 나무 데크',
     build(points) {
@@ -4009,6 +4036,7 @@ function loadSavedLayout() {
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '111', migrateVillageFrontage);
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '116', migrateVillageBalance);
     clean = migrateSavedComposition(clean, JSON.stringify(clean), '117', migrateVillageSimplicity);
+    clean = migrateSavedComposition(clean, JSON.stringify(clean), 'owner-bridge-1', migrateYulFootbridge);
     return clean.filter((entry) => !isRetiredOceanTrail(entry));
   } catch (e) { /* corrupt -> fall back to default */ }
   return null;
@@ -5105,7 +5133,41 @@ function migrateVillageSimplicity(layout) {
   return layout.filter((p) => !retired.has(p));
 }
 
-const DEFAULT_LAYOUT = migrateVillageSimplicity(VILLAGE_BALANCED_LAYOUT);
+const VILLAGE_SIMPLE_LAYOUT = migrateVillageSimplicity(VILLAGE_BALANCED_LAYOUT);
+
+// One continuous pedestrian connection from the southern garden to the east
+// harbor. Its ends join existing paths; the bridge never changes the sea mask.
+const YUL_FOOTBRIDGE_POINTS = [
+  [0.2095903325, -0.9348785590, 0.2864855537],
+  [0.4130152859, -0.7473519700, 0.5204646065],
+  [0.84, -0.28, 0.46],
+  [0.90, 0.15, 0.38],
+  [0.6608928, 0.3905276, 0.6408658],
+];
+
+function migrateYulFootbridge(layout) {
+  if (layout.some((entry) => entry.id === 'yul.footbridge')) return layout;
+  const unit = (n) => new THREE.Vector3(...n).normalize();
+  const dir = (entry) => entry.n ? unit(entry.n) : mapDir(entry.x, entry.z);
+  const home = layout.find((entry) => entry.ownerKey === 'yul' && entry.type === 'cottage');
+  const originalHome = VILLAGE_SIMPLE_LAYOUT.find((entry) => entry.ownerKey === 'yul');
+  if (!home || dir(home).angleTo(dir(originalHome)) > 0.003
+      || Math.abs(wrappedAngle((home.yaw || 0) - originalHome.yaw)) > 0.003) return layout;
+  const requiredPaths = VILLAGE_SIMPLE_LAYOUT.filter((entry) => entry.id === 'south.garden-loop'
+    || (entry.type === 'road' && normalizePathDirs(entry).some((point) => point.angleTo(unit(YUL_FOOTBRIDGE_POINTS.at(-1))) < 0.003)));
+  const samePath = (entry, original) => {
+    if (entry.kind !== 'path' || entry.type !== original.type) return false;
+    const actual = normalizePathDirs(entry), expected = normalizePathDirs(original);
+    return actual.length === expected.length && actual.every((point, i) => point.angleTo(expected[i]) < 0.003);
+  };
+  // Saved user edits stay intact. A moved destination or approach needs a
+  // route chosen for that arrangement instead of reintroducing stock paths.
+  if (requiredPaths.length !== 2 || requiredPaths.some((path) => !layout.some((entry) => samePath(entry, path)))) return layout;
+  return [...layout, { kind: 'path', type: 'footbridge', id: 'yul.footbridge', districtId: 'yul',
+    n: YUL_FOOTBRIDGE_POINTS.map((point) => unit(point).toArray()) }];
+}
+
+const DEFAULT_LAYOUT = migrateYulFootbridge(VILLAGE_SIMPLE_LAYOUT);
 
 // Home driveways are terrain tied to each service-home spot — regenerated
 // whenever the layout changes, so they follow the houses around in edit mode.
@@ -6435,8 +6497,8 @@ const AGENTS = AGENT_CONFIG.map((a) => ({
   },
   lines: Array.isArray(a.lines) && a.lines.length ? a.lines : ['…'],
   status: {
-    state: a.defaultStatus?.state || '대기 중',
-    task: a.defaultStatus?.task || '',
+    state: OWNER_MODE ? '상태 미확인' : (a.defaultStatus?.state || '대기 중'),
+    task: OWNER_MODE ? '업무 기록은 개인 작업실에서 확인하세요.' : (a.defaultStatus?.task || ''),
     updatedAt: null,
     progress: null,
     result: null,
@@ -6462,6 +6524,7 @@ let resultRefreshInFlight = null;
 let opsBeaconFleetSummary = null;
 
 async function refreshPublicResults() {
+  if (OWNER_MODE) { await ownerWorkspace?.refresh(); return false; }
   if (resultRefreshInFlight) return resultRefreshInFlight;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
@@ -7072,6 +7135,7 @@ let dashboardUpdatePatrol = () => {}; // optional read-only monitoring tour
 let dashboardStopPatrol = () => {};
 let dashboardPatrolState = () => ({ enabled: false });
 let dashboardOpenAgentByIndex = () => {};
+let openNearbyAgent = () => {};         // same resident view as clicking, staying in explore mode
 let openServicePanel = () => {};        // assigned by the service-panel wiring below
 let closeServicePanel = () => {};       // "
 let refreshOpenServicePanel = () => {};
@@ -7339,7 +7403,7 @@ let stickVec = { x: 0, y: 0 };
 const joystickControls = bindVirtualJoystick({
   stick: document.getElementById('stick'), knob: document.getElementById('knob'), vector: stickVec,
   enabled: () => !editMode && experienceMode === 'explore'
-    && !document.body.matches('.agent-detail-open, .service-detail-open, .team-overview-open')
+    && !document.body.matches('.agent-detail-open, .service-detail-open, .team-overview-open, .owner-panel-open')
     && !villageBoard.isOpen() && !roseStory.isOpen(),
 });
 function resetTransientControls() {
@@ -7376,7 +7440,7 @@ function pollGamepadInput(dt) {
     gamepadSnapshot = next;
     return next;
   }
-  if (villageBoard.isOpen() || roseStory.isOpen()) {
+  if (villageBoard.isOpen() || roseStory.isOpen() || document.body.classList.contains('owner-panel-open')) {
     gamepadJumpHeld = next.jump;
     gamepadInteractHeld = next.interact;
     gamepadSnapshot = next;
@@ -8412,7 +8476,7 @@ function animate(dt, elapsed, now) {
 
   // ---- movement input: W/S = forward/backstep along facing · A/D = turn ----
   let fwd = 0, turn = 0;
-  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen()) {
+  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen() && !document.body.classList.contains('owner-panel-open')) {
     if (keys['w'] || keys['arrowup'])    fwd += 1;
     if (keys['s'] || keys['arrowdown'])  fwd -= 1;
     if (keys['a'] || keys['arrowleft'])  turn += 1;
@@ -8439,7 +8503,7 @@ function animate(dt, elapsed, now) {
   }
 
   // ---- jump physics (vertical hop above the surface) ----
-  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen() && !activeBoatItem && jumpRequested && onGround) {
+  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen() && !document.body.classList.contains('owner-panel-open') && !activeBoatItem && jumpRequested && onGround) {
     jumpVel = JUMP_SPEED; onGround = false;
   }
   jumpRequested = false;
@@ -8845,7 +8909,7 @@ addEventListener('keydown', anyKeyStart);
   const PATH_NAMES = {
     road: '🛣️ 도로', lane: '🧱 마을 골목', river: '🌊 물길', trail: '🛤️ 흙길',
     snow: '❄️ 눈길', pond: '🏞️ 연못', sand: '🏖️ 모래밭', grass: '🌿 풀밭',
-    island: '🏝️ 섬', sea: '🌐 바다', deck: '▦ 데크', market: '⚑ 어시장',
+    island: '🏝️ 섬', sea: '🌐 바다', deck: '▦ 데크', footbridge: '🌉 바다 보행교', market: '⚑ 어시장',
     breakwater: '▰ 방파제', wave: '≋ 파도', camellia: '✿ 동백길',
     streetEdge: '▱ 도로 연석', laneEdge: '▱ 골목 연석', hedge: '♧ 생울타리',
     quayRail: '⌇ 부두 난간', courtyard: '▦ 건물 앞마당',
@@ -9071,6 +9135,15 @@ addEventListener('keydown', anyKeyStart);
 // agent-status.json(같은 폴더)을 주기적으로 읽어 갱신하므로, 그 파일만
 // 바꾸면 실시간 대시보드로 동작한다.
 // ===========================================================================
+if (OWNER_MODE) {
+  ownerWorkspace = initOwnerWorkspace({
+    preview: URL_PARAMS.get('ownerPreview') === '1',
+    onStateChange(snapshot) { ownerSnapshot = snapshot; ownerStateChanged(); },
+    onOpen() { resetTransientControls(); dashboardStopPatrol(); dashboardCloseCard(); dashboardCloseTeam(); closeServicePanel(); closeVisitorPanels(); },
+  });
+  document.getElementById('startBtn')?.addEventListener('click', () => ownerWorkspace.open());
+}
+
 (function wireAgentDashboard() {
   const cardEl = document.getElementById('agentCard');
   const barEl = document.getElementById('agentbar');
@@ -9152,6 +9225,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   function openTeamOverview() {
+    if (OWNER_MODE) { ownerWorkspace.open({ tab: 'board' }); return; }
     if (!teamPanelEl) return;
     dashboardStopPatrol();
     closeVisitorPanels();
@@ -9262,6 +9336,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   function renderStatusFreshness() {
+    if (OWNER_MODE) { renderOwnerVillage(); return; }
     if (!freshnessEl) return;
     const now = Date.now();
     const checked = lastStatusReceivedAt ? timeAgo(lastStatusReceivedAt).replace(' 갱신', '') : '';
@@ -9302,6 +9377,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   function renderConnectionBadge() {
+    if (OWNER_MODE) { renderOwnerVillage(); return; }
     if (!connectionEl) return;
     let state = connectionState;
     let label = ({ live: '실시간', polling: '주기 확인', loading: '연결 중', offline: '오프라인' })[state] || state;
@@ -9503,6 +9579,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   function openAgentCard(a, { focus = true } = {}) {
+    if (OWNER_MODE) { ownerWorkspace.open({ tab: 'board', agent: a.key }); return; }
     closeVisitorPanels();
     closeTeamOverview();
     markVisitorStep('agent');
@@ -9539,6 +9616,12 @@ addEventListener('keydown', anyKeyStart);
     dashboardStopPatrol();
     closeServicePanel();
     setExperienceMode('dashboard');
+    openAgentCard(agent);
+  };
+  openNearbyAgent = (agent) => {
+    resetTransientControls();
+    dashboardStopPatrol();
+    closeServicePanel();
     openAgentCard(agent);
   };
 
@@ -9645,6 +9728,7 @@ addEventListener('keydown', anyKeyStart);
     chips[a.key] = chip;
   }
   function refreshBar() {
+    if (OWNER_MODE) { renderOwnerVillage(); return; }
     for (const a of AGENTS) {
       const st = chips[a.key].querySelector('.chip-state');
       if (st) {
@@ -9656,6 +9740,33 @@ addEventListener('keydown', anyKeyStart);
     }
     if (openAgent) renderCard(openAgent);   // keep an open card in sync
   }
+
+  function renderOwnerVillage() {
+    const view = projectOwnerVillage(ownerSnapshot, AGENTS.map((a) => a.key), { hidden: document.hidden });
+    for (const a of AGENTS) {
+      const chip = chips[a.key];
+      if (!chip) continue;
+      const resident = view.residents[a.key];
+      const text = chip.querySelector('.chip-state');
+      if (text) { text.textContent = resident.label; text.style.color = resident.needsAttention ? '#906836' : ''; }
+      chip.title = resident.detail;
+      chip.setAttribute('aria-label', `${a.kor || a.name} · ${resident.label}`);
+      chip.classList.remove('busy');
+    }
+    if (connectionEl) {
+      connectionEl.className = `status-connection ${view.state === 'current' ? 'polling' : 'stale'}`;
+      connectionEl.textContent = ({ current: '15초 자동조회', waiting: '업무 확인 중', unavailable: '보드 확인 지연', locked: '로그인 후 조회' })[view.state];
+    }
+    if (freshnessEl) {
+      freshnessEl.classList.toggle('stale', view.state === 'unavailable');
+      freshnessEl.textContent = view.state === 'current'
+        ? `보드 ${timeAgo(view.lastSuccessAt)} · 전체 활동은 미확인`
+        : view.state === 'locked' ? '로그인하면 마을에서도 업무를 자동 확인합니다.'
+          : view.lastSuccessAt ? `보드 마지막 확인 ${timeAgo(view.lastSuccessAt).replace(' 갱신', '')} · 작업실에서 연결 확인`
+            : '첫 업무 보드를 확인하고 있습니다.';
+    }
+  }
+  if (OWNER_MODE) { ownerStateChanged = renderOwnerVillage; renderOwnerVillage(); }
 
   // ---- 3D에서 에이전트 클릭 → 카드 (플레이 모드 전용) ----
   let clickStart = null;
@@ -10092,7 +10203,7 @@ addEventListener('keydown', anyKeyStart);
   }
   renderTeamOverview();
   refreshRecentResultsUi();
-  statusSource = createAgentStatusSource({
+  statusSource = OWNER_MODE ? null : createAgentStatusSource({
     config: RUNTIME_CONFIG.status,
     onSnapshot: applyAgentStatus,
     onConnectionChange(state) {
@@ -10102,7 +10213,9 @@ addEventListener('keydown', anyKeyStart);
       renderTeamOverview();
     },
   });
+  if (OWNER_MODE) { renderConnectionBadge(); renderStatusFreshness(); }
   refreshBtn?.addEventListener('click', async () => {
+    if (OWNER_MODE) { ownerWorkspace.open(); return; }
     if (refreshBtn.classList.contains('refreshing')) return;
     refreshBtn.classList.add('refreshing');
     refreshBtn.disabled = true;
@@ -10136,8 +10249,7 @@ addEventListener('keydown', anyKeyStart);
   const resultsPane = el('resultsPane');
   const mobileInteractBtn = el('mobileInteractBtn');
   let openFor = null;          // agent whose panel is open
-  let nearAgent = null;        // agent whose door we're standing at
-  let nearBoat = null;
+  let nearbyInteraction = null;
   let interactionPromptKey = '';
   let servicePanelOpener = null;
   const serviceSelect = el('serviceSelect');
@@ -10244,6 +10356,7 @@ addEventListener('keydown', anyKeyStart);
   }
 
   openServicePanel = function (a, { tab = 'service' } = {}) {
+    if (OWNER_MODE) { ownerWorkspace.open({ tab: a.key === 'rodi' ? 'results' : a.key === 'jarvis' ? 'jobs' : 'board', agent: a.key }); return; }
     ambientAudio.playEffect('open');
     dashboardStopPatrol();
     closeVisitorPanels();
@@ -10314,44 +10427,50 @@ addEventListener('keydown', anyKeyStart);
   refreshOpenServicePanel = () => { if (openFor) renderHomeResults(openFor); };
   el('serviceClose').addEventListener('click', () => closeServicePanel(true));
 
-  // ---- 입장 프롬프트 (문 앞 감지는 메인 루프가 매 프레임 호출) ----
-  // The trigger follows the actual front-door offset, not the building center.
-  // This keeps the passing loop quiet while leaving a comfortable tap radius.
-  const ENTER_ANGLE = 0.18;
+  // One target for keyboard, touch and gamepad. Boats keep their existing
+  // priority; a nearby resident can be addressed before entering their house.
   updateServiceProximity = function () {
-    let best = null, bestD = ENTER_ANGLE;
-    let boat = activeBoatItem;
-    if (!editMode && !openFor && experienceMode === 'explore') {
-      if (!boat) boat = nearestBoardableBoat();
-      if (!boat) {
-        for (const a of AGENTS) {
-          const doorDir = homeDoorDir(a.home);
-          if (!doorDir) continue;
-          const d = playerDir.angleTo(doorDir);
-          if (d < bestD) { best = a; bestD = d; }
+    const blocked = editMode || openFor || experienceMode !== 'explore' || cameraIntro || intro.isConnected
+      || villageBoard.isOpen() || roseStory.isOpen()
+      || document.body.matches('.agent-detail-open, .service-detail-open, .team-overview-open, .owner-panel-open');
+    const residents = [], homes = [];
+    if (!blocked) {
+      for (const agent of AGENTS) {
+        if (agent.npc?.visible && agent.npc.userData.dir) {
+          residents.push({ target: agent, distance: playerDir.angleTo(agent.npc.userData.dir) });
         }
+        const doorDir = homeDoorDir(agent.home);
+        if (doorDir) homes.push({ target: agent, distance: playerDir.angleTo(doorDir) });
       }
     }
-    const promptKey = activeBoatItem ? 'boat-exit' : boat ? 'boat-enter' : best?.key || '';
-    nearAgent = best;
-    nearBoat = boat;
+    nearbyInteraction = selectNearbyInteraction({
+      blocked, activeBoat: activeBoatItem,
+      nearbyBoat: !blocked && !activeBoatItem ? nearestBoardableBoat() : null,
+      residents, homes,
+    });
+    const resident = nearbyInteraction?.kind === 'resident' ? nearbyInteraction.target : null;
+    const best = nearbyInteraction?.kind === 'home' ? nearbyInteraction.target : null;
+    const boat = nearbyInteraction?.kind.startsWith('boat-') ? nearbyInteraction.target : null;
+    const promptKey = nearbyInteraction ? `${nearbyInteraction.kind}:${resident?.key || best?.key || ''}` : '';
     if (promptKey === interactionPromptKey) return;
     interactionPromptKey = promptKey;
     if (mobileInteractBtn) {
       mobileInteractBtn.disabled = !promptKey;
-      const label = activeBoatItem
+      const label = boat && activeBoatItem
         ? '배에서 내리기'
         : boat
           ? '어선 승선'
-          : best
-            ? (best.service?.name || best.kor + '의 집') + ' 입장'
-            : '가까운 집 또는 배 이용';
+          : resident
+            ? `${resident.kor}에게 말 걸기`
+            : best
+              ? (best.service?.name || best.kor + '의 집') + ' 입장'
+              : '가까운 주민·집·배 이용';
       mobileInteractBtn.setAttribute('aria-label', label);
       mobileInteractBtn.title = label;
       const icon = mobileInteractBtn.querySelector('span');
-      if (icon) icon.textContent = activeBoatItem || boat ? '⛵' : '⌂';
+      if (icon) icon.textContent = boat ? '⛵' : resident ? '💬' : '⌂';
     }
-    if (activeBoatItem || boat) {
+    if (boat) {
       promptEl.textContent = '';
       const icon = document.createElement('span');
       icon.textContent = '⛵ ';
@@ -10360,6 +10479,19 @@ addEventListener('keydown', anyKeyStart);
       const hint = document.createElement('span');
       hint.className = 'enter-key';
       hint.textContent = activeBoatItem ? 'F 하선' : 'F 승선';
+      promptEl.append(icon, label, hint);
+      promptEl.classList.add('show');
+      promptEl.tabIndex = 0;
+      setInteractiveState(promptEl, true);
+    } else if (resident) {
+      promptEl.textContent = '';
+      const icon = document.createElement('span');
+      icon.textContent = '💬 ';
+      const label = document.createElement('b');
+      label.textContent = resident.kor;
+      const hint = document.createElement('span');
+      hint.className = 'enter-key';
+      hint.textContent = 'F 말 걸기';
       promptEl.append(icon, label, hint);
       promptEl.classList.add('show');
       promptEl.tabIndex = 0;
@@ -10385,19 +10517,23 @@ addEventListener('keydown', anyKeyStart);
     }
   };
   activateNearbyService = () => {
-    if (editMode || openFor || villageBoard.isOpen() || roseStory.isOpen() || experienceMode !== 'explore') return false;
-    if (activeBoatItem) return disembarkBoat();
-    if (nearBoat) return boardBoat(nearBoat);
-    if (!nearAgent) return false;
-    openServicePanel(nearAgent);
+    // A walking resident may have moved since the last frame's prompt.
+    updateServiceProximity();
+    if (!nearbyInteraction) return false;
+    const { kind, target } = nearbyInteraction;
+    if (kind === 'boat-exit') return disembarkBoat();
+    if (kind === 'boat-enter') return boardBoat(target);
+    if (kind === 'resident') openNearbyAgent(target);
+    else openServicePanel(target);
+    updateServiceProximity();
     return true;
   };
   promptEl.addEventListener('click', activateNearbyService);
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     // Korean IMEs may report either the consonant or Process with KeyF.
-    const boatKey = (activeBoatItem || nearBoat) && (k === '\u3139' || e.code === 'KeyF');
-    if ((k === 'f' || boatKey) && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
+    const interactionKey = k === 'f' || k === '\u3139' || e.code === 'KeyF';
+    if (interactionKey && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
         && !isUiInteractionTarget(e.target)) activateNearbyService();
     else if (k === 'escape') closeServicePanel(true);
   });
@@ -10425,6 +10561,28 @@ if (URL_PARAMS.has('dev')) {
       beginGame('explore', { cinematic: false });
       commitPlayerSurfaceDirection(offsetSurfaceDir(NORTH_POLE, new THREE.Vector3(1, 0, 0), 0.20));
       playerForward.copy(NORTH_POLE).addScaledVector(playerDir, -NORTH_POLE.dot(playerDir)).normalize();
+      camDir.copy(playerForward);
+    });
+  } else if (URL_PARAMS.get('qaView') === 'resident') {
+    queueMicrotask(() => {
+      const agent = AGENTS.find((entry) => entry.key === URL_PARAMS.get('qaAgent'));
+      const dir = agent?.npc?.userData.dir;
+      if (!dir) return;
+      beginGame('explore', { cinematic: false });
+      commitPlayerSurfaceDirection(offsetSurfaceDir(dir, propFacing(dir, 0), 0.10));
+      playerForward.copy(dir).addScaledVector(playerDir, -dir.dot(playerDir)).normalize();
+      camDir.copy(playerForward);
+    });
+  } else if (URL_PARAMS.get('qaView') === 'footbridge') {
+    queueMicrotask(() => {
+      const bridge = editablePaths.find((path) => path.data.id === 'yul.footbridge');
+      if (!bridge) return;
+      const points = bridge.data.dirs;
+      beginGame('explore', { cinematic: false });
+      const start = points[0], next = points[1];
+      const forward = next.clone().addScaledVector(start, -next.dot(start)).normalize();
+      commitPlayerSurfaceDirection(offsetSurfaceDir(start, forward, -0.045));
+      playerForward.copy(forward); keepTangentAtPlayer(playerForward);
       camDir.copy(playerForward);
     });
   }
@@ -11062,6 +11220,38 @@ if (URL_PARAMS.has('dev')) {
       const p = document.getElementById('enterPrompt');
       return { editMode, cls: p.className, text: p.textContent };
     },
+    testYulFootbridge() {
+      const bridge = editablePaths.find((path) => path.data.id === 'yul.footbridge');
+      const home = AGENTS.find((agent) => agent.key === 'yul')?.home;
+      if (!bridge || !home || activeBoatItem) return { pass: false, reason: 'missing-footbridge-or-home' };
+      const original = { player: playerDir.clone(), forward: playerForward.clone(), camera: camDir.clone(),
+        safe: lastSafePlayerDir.clone(), mode: experienceMode, blocked: playerBlockedFor };
+      const allowed = (dir) => playerSurfaceAllowed(dir, false) && hasSurfaceClearance(dir, PLAYER_CLEARANCE_RADIUS);
+      const walk = (points) => walkSurfaceRoute(points, {
+        getPosition: () => playerDir, move: tryMovePlayerOnSurface, allowed,
+      });
+      const samples = splineDirs(bridge.data.dirs, { step: 0.025 }).dirs;
+      try {
+        experienceMode = 'explore';
+        commitPlayerSurfaceDirection(samples[0]);
+        const crossing = walk(samples);
+        const door = homeDoorDir(home);
+        const entrance = offsetSurfaceDir(door, propFacing(home.dir, home.data.yaw || 0), 0.04);
+        const approach = crossing.pass ? findSurfaceRoute(playerDir, entrance, allowed) : null;
+        const toHome = approach ? walk(approach) : null;
+        const reachedDoor = !!toHome?.pass && playerDir.angleTo(door) < 0.18;
+        const back = reachedDoor ? walk([...approach].reverse().concat([...samples].reverse())) : null;
+        const waterSamples = samples.filter(isWaterSurfaceDir).length;
+        return { crossing, toHome, reachedDoor, back, waterSamples,
+          length: +(samples.slice(1).reduce((sum, dir, i) => sum + dir.angleTo(samples[i]) * R, 0)).toFixed(2),
+          pass: crossing.pass && reachedDoor && !!back?.pass && waterSamples > 0
+            && playerDir.angleTo(samples[0]) < 0.01 };
+      } finally {
+        playerDir.copy(original.player); playerForward.copy(original.forward); camDir.copy(original.camera);
+        lastSafePlayerDir.copy(original.safe); experienceMode = original.mode; playerBlockedFor = original.blocked;
+        updateServiceProximity();
+      }
+    },
     testHomeWalks() {
       if (activeBoatItem) return { pass: false, reason: 'already-aboard', homes: [] };
       const original = { player: playerDir.clone(), forward: playerForward.clone(), camera: camDir.clone(),
@@ -11150,10 +11340,16 @@ if (URL_PARAMS.has('dev')) {
     },
   };
   if (URL_PARAMS.get('qa') === '1') {
-    queueMicrotask(() => {
+    queueMicrotask(async () => {
+      // Interaction prompts are intentionally disabled behind the intro.
+      // Run their QA after the same transition a player uses to enter town.
+      if (intro.isConnected) beginGame('explore', { cinematic: false });
+      while (intro.isConnected) await new Promise(requestAnimationFrame);
       const homes = window.devPlanet.testAllHomes();
       const homeWalks = window.devPlanet.testHomeWalks();
       document.documentElement.dataset.qaHomeWalks = JSON.stringify(homeWalks);
+      const yulFootbridge = window.devPlanet.testYulFootbridge();
+      document.documentElement.dataset.qaYulFootbridge = JSON.stringify(yulFootbridge);
       const coverage = window.devPlanet.terrainCoverage();
       const waterAccess = window.devPlanet.waterAccessState();
       const boatLifecycle = window.devPlanet.testBoatLifecycle();
@@ -11209,6 +11405,7 @@ if (URL_PARAMS.has('dev')) {
       document.documentElement.dataset.qaRecovery = JSON.stringify(window.devPlanet.testPlayerRecovery());
       document.documentElement.dataset.qaReady = homes.every((item) => item.ok)
         && homeWalks.pass
+        && yulFootbridge.pass
         && window.devPlanet.layoutAudit().status === 'ready'
         && window.devPlanet.townWalkability().pass
         && coverage.waterPercent >= 34
