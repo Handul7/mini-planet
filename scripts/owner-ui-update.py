@@ -27,9 +27,13 @@ MAX_ARCHIVE = 32 * 1024 * 1024
 MAX_EXTRACTED = 64 * 1024 * 1024
 
 
+class UpdateError(ValueError):
+    """A fixed diagnostic code safe to include in operational logs."""
+
+
 def require(condition, message):
     if not condition:
-        raise ValueError(message)
+        raise UpdateError(message)
 
 
 def download(url, maximum):
@@ -64,7 +68,7 @@ def validate_manifest(value, commit):
     return value
 
 
-def extract_ui(archive, destination):
+def extract_ui(archive, destination, expected_commit=None):
     """Manual extraction: no links, traversal, scripts, local overrides or devices."""
     seen, roots, total = set(), set(), 0
     with tarfile.open(archive, 'r:gz') as bundle:
@@ -94,6 +98,13 @@ def extract_ui(archive, destination):
     require(roots == PUBLIC, 'incomplete_public_tree')
     for name in ['index.html', 'sw.js', 'src/main.js', 'src/owner-client.js', 'src/owner-workspace.js']:
         require((destination / name).is_file(), 'missing_required_ui')
+    if expected_commit is not None:
+        stamp = destination / 'src/owner-release.json'
+        require(stamp.is_file() and stamp.stat().st_size <= 4096, 'missing_release_identity')
+        identity = json.loads(stamp.read_text())
+        require(isinstance(identity, dict) and identity.get('commit') == expected_commit
+                and type(identity.get('apiContract')) is int and identity['apiContract'] == 1,
+                'release_identity_mismatch')
 
 
 def load_config(path):
@@ -129,16 +140,29 @@ def manage(config, action):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=40)
 
 
-def healthy(config, expected_digest):
+def site_fingerprints(root):
+    paths = ['index.html', 'src/main.js', 'sw.js', 'src/owner-release.json']
+    return {'/' + name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+            for name in paths if (root / name).is_file()}
+
+
+def healthy(config, fingerprints):
     port = config.get('ownerPort', 8787)
     host = urlsplit(config['publicOrigin']).netloc if config.get('publicOrigin') else f'127.0.0.1:{port}'
     for _ in range(10):
         connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
         try:
-            connection.request('GET', '/index.html', headers={'Host': host})
-            response = connection.getresponse()
-            body = response.read(MAX_ARCHIVE + 1)
-            if response.status == 200 and hashlib.sha256(body).hexdigest() == expected_digest:
+            matches = bool(fingerprints)
+            for path, expected in fingerprints.items():
+                connection.close()
+                connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+                connection.request('GET', path, headers={'Host': host})
+                response = connection.getresponse()
+                body = response.read(MAX_ARCHIVE + 1)
+                if response.status != 200 or hashlib.sha256(body).hexdigest() != expected:
+                    matches = False
+                    break
+            if matches:
                 connection.close()
                 connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
                 connection.request('GET', '/owner/session', headers={'Host': host})
@@ -167,8 +191,8 @@ def activate(config, staged, commit, *, control=manage, check=healthy):
     journal = state / 'pending.json'
     require(not journal.exists(), 'unfinished_update_requires_recovery')
     backup = root.parent / f'.owner-ui-backup-{time.time_ns()}'
-    old_digest = hashlib.sha256((root / 'index.html').read_bytes()).hexdigest()
-    new_digest = hashlib.sha256((staged / 'index.html').read_bytes()).hexdigest()
+    old_digest = site_fingerprints(root)
+    new_digest = site_fingerprints(staged)
     require(check(config, old_digest), 'existing_owner_healthcheck_failed')
     write_json(journal, {'commit': commit, 'backup': str(backup), 'siteRoot': str(root), 'stage': str(staged)})
     swapped = False
@@ -222,7 +246,7 @@ def run(config, apply=False):
             staging = Path(temp)
             tar = staging / 'ui.tar.gz'; tar.write_bytes(archive)
             site = staging / 'site'; site.mkdir()
-            extract_ui(tar, site)
+            extract_ui(tar, site, expected_commit=commit)
             if apply:
                 try:
                     activate(config, site, commit)
@@ -242,5 +266,6 @@ if __name__ == '__main__':
         run(load_config(args.config), args.apply)
     except Exception as error:
         # No URLs, credentials, private paths or subprocess output in logs.
-        print(f'UI update stopped ({type(error).__name__}). Existing backup/journal retained if recovery is needed.')
+        reason = str(error) if isinstance(error, UpdateError) else type(error).__name__
+        print(f'UI update stopped ({reason}). Existing backup/journal retained if recovery is needed.')
         raise SystemExit(1)

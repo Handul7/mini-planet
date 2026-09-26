@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import sys
+import hashlib
 
 spec = importlib.util.spec_from_file_location('ui_update', Path(__file__).parents[1] / 'scripts/owner-ui-update.py')
 updater = importlib.util.module_from_spec(spec)
@@ -55,6 +56,48 @@ class UpdateTests(unittest.TestCase):
         bad = tarfile.TarInfo('index.html'); bad.size = 1
         with self.assertRaisesRegex(ValueError, 'duplicate'):
             updater.extract_ui(self.archive(bad), dest)
+
+    def test_release_identity_must_match_downloaded_commit(self):
+        archive = self.archive()
+        dest = self.base / 'no-identity'; dest.mkdir()
+        with self.assertRaisesRegex(ValueError, 'missing_release_identity'):
+            updater.extract_ui(archive, dest, expected_commit='a' * 40)
+        for commit in ['a' * 40, 'b' * 40]:
+            # Append the small public version stamp to the otherwise valid UI.
+            with tarfile.open(archive, 'r:gz') as original:
+                members = [(member, original.extractfile(member).read()) for member in original]
+            with tarfile.open(archive, 'w:gz') as bundle:
+                for member, body in members:
+                    if member.name != 'src/owner-release.json': bundle.addfile(member, io.BytesIO(body))
+                body = json.dumps({'commit': commit, 'apiContract': 1}).encode()
+                member = tarfile.TarInfo('src/owner-release.json'); member.size = len(body)
+                bundle.addfile(member, io.BytesIO(body))
+            dest = self.base / commit; dest.mkdir()
+            if commit.startswith('a'):
+                updater.extract_ui(archive, dest, expected_commit='a' * 40)
+            else:
+                with self.assertRaisesRegex(ValueError, 'release_identity_mismatch'):
+                    updater.extract_ui(archive, dest, expected_commit='a' * 40)
+
+    def test_same_html_with_old_javascript_does_not_pass_deployment_health(self):
+        responses = {'/index.html': b'unchanged HTML', '/src/main.js': b'old javascript',
+                     '/owner/session': b'{"authenticated":false}'}
+        requests = []
+        class Connection:
+            def __init__(self, *args, **kwargs): pass
+            def request(self, method, path, headers): self.path = path; requests.append(path)
+            def getresponse(self):
+                self.status = 401 if self.path == '/owner/session' else 200
+                return self
+            def read(self, size): return responses[self.path]
+            def close(self): pass
+        fingerprints = {path: hashlib.sha256(body).hexdigest() for path, body in {
+            '/index.html': b'unchanged HTML', '/src/main.js': b'new javascript'}.items()}
+        with patch.object(updater.http.client, 'HTTPConnection', Connection), patch.object(updater.time, 'sleep'):
+            self.assertFalse(updater.healthy({}, fingerprints))
+            self.assertIn('/src/main.js', requests)
+            responses['/src/main.js'] = b'new javascript'
+            self.assertTrue(updater.healthy({}, fingerprints))
 
     def config(self):
         root = self.base / '_site'; root.mkdir(); (root / 'index.html').write_text('old')

@@ -305,7 +305,7 @@ export function initOwnerWorkspace({ onOpen = () => {}, onStateChange = () => {}
     login.hidden = state.authenticated;
     body.hidden = !state.authenticated;
     loginMessage.textContent = SESSION_ERROR[state.sessionError] || '';
-    retryLogout.hidden = state.sessionError !== 'logout_failed';
+    retryLogout.hidden = !state.logoutUnconfirmed && state.sessionError !== 'logout_failed';
     submit.disabled = loggingIn || state.loggingOut;
     submit.textContent = state.loggingOut ? '로그아웃 중…' : loggingIn ? '확인 중…' : '작업실 열기';
     refresh.disabled = refreshing;

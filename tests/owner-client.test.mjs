@@ -185,3 +185,44 @@ test('re-login waits for the cookie-clearing logout response', async () => {
   assert.equal(client.snapshot().loggingOut, false);
   client.dispose();
 });
+
+test('unconfirmed logout cannot silently restore a surviving cookie session', async () => {
+  let failDelete = true, wrongPassword = false;
+  const methods = [];
+  const client = createOwnerClient({ now: () => capturedAt, fetchImpl: async (_, options) => {
+    methods.push(options.method || 'GET');
+    if (options.method === 'DELETE') {
+      if (failDelete) throw new Error('offline');
+      return json({ authenticated: false });
+    }
+    if (options.method === 'POST' && wrongPassword) return json({ authenticated: false }, 401);
+    return json({ authenticated: true, expiresAt: new Date(capturedAt + 3600000).toISOString() });
+  } });
+  await client.checkSession(); await client.logout();
+  const count = methods.length;
+  assert.equal(await client.checkSession(), false);
+  assert.equal(methods.length, count, 'tab resume must not even send the stale cookie');
+  assert.equal(client.snapshot().logoutUnconfirmed, true);
+  wrongPassword = true;
+  assert.equal(await client.login('wrong'), false);
+  assert.equal(await client.checkSession(), false);
+  assert.equal(client.snapshot().logoutUnconfirmed, true);
+  failDelete = false;
+  await client.logout();
+  assert.equal(client.snapshot().logoutUnconfirmed, false);
+  client.dispose();
+});
+
+test('explicit successful login can unlock an unconfirmed logout, but malformed success cannot', async () => {
+  const client = createOwnerClient({ now: () => capturedAt, fetchImpl: async (_, options) => {
+    if (options.method === 'DELETE') return json({ authenticated: true });
+    return json({ authenticated: true, expiresAt: new Date(capturedAt + 3600000).toISOString() });
+  } });
+  await client.login('test'); await client.logout();
+  assert.equal(client.snapshot().sessionError, 'logout_failed');
+  assert.equal(await client.checkSession(), false);
+  await client.login('test');
+  assert.equal(client.snapshot().authenticated, true);
+  assert.equal(client.snapshot().logoutUnconfirmed, false);
+  client.dispose();
+});

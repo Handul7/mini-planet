@@ -41,6 +41,16 @@ jobs:
         run: python3 -B -m unittest discover -s tests -p test_owner_ui_update.py -v
       - name: Build public UI
         run: node scripts/build-site.mjs
+      - name: Stamp the served release identity
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          commit = os.environ['GITHUB_SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', commit):
+              raise SystemExit('Expected a full Git commit SHA.')
+          Path('_site/src/owner-release.json').write_text(json.dumps({'commit': commit, 'apiContract': 1}) + '\n')
+          PY
       - name: Validate artifact boundary
         run: node scripts/validate-site-artifact.mjs _site
       - name: Package reproducible UI archive and manifest

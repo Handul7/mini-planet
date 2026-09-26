@@ -11,6 +11,7 @@ export function createOwnerClient({ fetchImpl = globalThis.fetch, now = Date.now
   let sessionController = null;
   let logoutPromise = null;
   let loggingOut = false;
+  let logoutUnconfirmed = false;
   const requests = new Map();
   const notify = () => onChange(snapshot());
 
@@ -40,6 +41,9 @@ export function createOwnerClient({ fetchImpl = globalThis.fetch, now = Date.now
 
   async function session(password) {
     if (logoutPromise) await logoutPromise;
+    // A failed DELETE may leave the HttpOnly cookie valid on the server. Only
+    // an explicit login or successful logout may clear this in-page lock.
+    if (password === undefined && logoutUnconfirmed) return false;
     const version = ++epoch;
     sessionController?.abort();
     for (const entry of requests.values()) entry.controller.abort();
@@ -61,6 +65,7 @@ export function createOwnerClient({ fetchImpl = globalThis.fetch, now = Date.now
       authenticated = true;
       expiresAt = body.expiresAt;
       sessionError = '';
+      logoutUnconfirmed = false;
       notify();
       return true;
     } catch {
@@ -82,7 +87,7 @@ export function createOwnerClient({ fetchImpl = globalThis.fetch, now = Date.now
   }
 
   function snapshot() {
-    return { authenticated, expiresAt, sessionError, loggingOut, resources: Object.fromEntries(Object.keys(OWNER_RESOURCE_PATHS).map((key) => [key, view(key)])) };
+    return { authenticated, expiresAt, sessionError, loggingOut, logoutUnconfirmed, resources: Object.fromEntries(Object.keys(OWNER_RESOURCE_PATHS).map((key) => [key, view(key)])) };
   }
 
   async function refresh(key) {
@@ -128,14 +133,18 @@ export function createOwnerClient({ fetchImpl = globalThis.fetch, now = Date.now
     logout() {
       if (logoutPromise) return logoutPromise;
       loggingOut = true;
+      logoutUnconfirmed = true;
       clear();
       const version = epoch;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8000);
       logoutPromise = (async () => {
         try {
-          const { response } = await jsonRequest('/owner/session', { method: 'DELETE', signal: controller.signal });
-          if (version === epoch && !response.ok) sessionError = 'logout_failed';
+          const { response, body } = await jsonRequest('/owner/session', { method: 'DELETE', signal: controller.signal });
+          if (version === epoch) {
+            logoutUnconfirmed = !(response.ok && body.authenticated === false);
+            sessionError = logoutUnconfirmed ? 'logout_failed' : '';
+          }
         } catch { if (version === epoch) sessionError = 'logout_failed'; }
         finally { clearTimeout(timer); loggingOut = false; logoutPromise = null; notify(); }
       })();
