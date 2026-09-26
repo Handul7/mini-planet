@@ -1,8 +1,10 @@
 import { createOwnerClient } from './owner-client.js';
+import { aggregateOwnerOverview } from './owner-overview.js';
 
 const NAMES = { rodi: '로디', jarvis: '자비스', yul: '율', ludwig: '루드비히', anne: '앤', argos: '아르고스', default: '기본 프로필' };
 const STATUS = { triage: '분류 전', todo: '할 일', scheduled: '예약됨', ready: '실행 대기', running: '진행 중', blocked: '막힘', review: '검토 중', done: '완료' };
 const FRESHNESS = { unknown: '미확인', ok: '방금 확인', stale: '확인 만료', error: '조회 실패', 'transport-error': '연결 실패', unsupported: '조회 미지원' };
+const RESOURCE_NAMES = { board: '업무 보드', 'jobs:default': '기본 프로필 일정', 'jobs:rodi': '로디 일정', 'jobs:jarvis': '자비스 일정', 'results:rodi': '로디 실행 요약' };
 const SESSION_ERROR = {
   invalid_password: '비밀번호를 다시 확인해주세요.', too_many_attempts: '잠시 후 다시 로그인해주세요.',
   host_unavailable: '개인용 서버에 연결하지 못했습니다. 개인용 주소에서 다시 열어주세요.',
@@ -26,8 +28,8 @@ function date(value) {
   return new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
 }
 
-export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) {
-  let tab = 'board';
+export function initOwnerWorkspace({ onOpen = () => {}, onStateChange = () => {}, preview = false } = {}) {
+  let tab = 'attention';
   let agent = '';
   let filter = '';
   let limit = 30;
@@ -37,8 +39,12 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
   let loggingIn = false;
   let refreshing = false;
   let lastRenderedTab = '';
+  let disposed = false;
+  let sessionPromise = null;
+  let reloadPromise = null;
+  const expandedTasks = new Set();
 
-  const launch = button('✦ 개인 작업실', () => show({ tab: 'board', agent: '' }), 'owner-launch');
+  const launch = button('✦ 개인 작업실', () => show(), 'owner-launch');
   launch.setAttribute('aria-haspopup', 'dialog');
   launch.setAttribute('aria-expanded', 'false');
   const panel = node('section', 'owner-workspace');
@@ -90,7 +96,7 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', '개인 업무 보기');
   const tabButtons = new Map();
-  for (const [key, text] of [['board', '업무'], ['jobs', '반복 일정'], ['results', '로디 요약']]) {
+  for (const [key, text] of [['attention', '확인할 일'], ['board', '업무'], ['jobs', '반복 일정'], ['results', '로디 요약']]) {
     const element = button(text, () => { tab = key; render(); reload(); });
     element.id = `ownerTab-${key}`;
     element.setAttribute('role', 'tab');
@@ -100,7 +106,7 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const index = keys.indexOf(tab);
-      tab = event.key === 'Home' ? keys[0] : event.key === 'End' ? keys.at(-1) : keys[(index + (event.key === 'ArrowRight' ? 1 : 2)) % keys.length];
+      tab = event.key === 'Home' ? keys[0] : event.key === 'End' ? keys.at(-1) : keys[(index + (event.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length];
       render(); tabButtons.get(tab).focus(); reload();
     });
     tabButtons.set(key, element); tabs.append(element);
@@ -131,7 +137,12 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
   panel.append(header, notice, login, body);
   document.body.append(launch, panel);
 
-  const client = createOwnerClient({ onChange(next) { state = next; render(); } });
+  const client = createOwnerClient({ onChange(next) {
+    if (disposed) return;
+    state = next;
+    onStateChange(state);
+    render();
+  } });
   state = client.snapshot();
 
   function freshness(key, container) {
@@ -141,7 +152,6 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
     container.append(row);
   }
   function updateFreshness() {
-    state = client.tick();
     for (const row of panel.querySelectorAll('[data-resource]')) {
       const view = state.resources[row.dataset.resource];
       row.dataset.state = view?.state || 'unknown';
@@ -159,6 +169,84 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
     if (view.state === 'stale') content.append(node('p', 'owner-warning', '마지막으로 확인한 기록입니다. 새로고침으로 현재 상태를 확인해주세요.'));
     if (view.state === 'error' || view.state === 'transport-error') empty('기록을 확인하지 못했어요', '연결을 확인한 뒤 다시 새로고침해주세요.');
   }
+  function taskCard(task) {
+    const card = node('article', 'owner-task');
+    card.dataset.taskId = task.id;
+    const meta = node('div', 'owner-task-meta');
+    meta.append(node('span', `owner-task-status status-${task.status}`, STATUS[task.status]),
+      node('span', '', NAMES[task.assignee] || task.assignee || '미배정'));
+    card.append(meta, node('h3', '', task.title), node('p', 'owner-task-date', `${task.completed_at ? '완료' : task.started_at ? '시작' : '생성'} ${date(task.completed_at || task.started_at || task.created_at)}`));
+    const details = node('details', 'owner-task-details');
+    details.open = expandedTasks.has(task.id);
+    const summary = node('summary', '', '업무 상세');
+    summary.id = `ownerTask-${Array.from(task.id, (char) => char.codePointAt(0).toString(16)).join('-')}`;
+    const fields = node('dl');
+    for (const [label, value] of [['업무 ID', task.id], ['담당', NAMES[task.assignee] || task.assignee || '미배정'],
+      ['상태', STATUS[task.status]], ['생성', date(task.created_at)], ['시작', date(task.started_at)], ['완료', date(task.completed_at)]]) {
+      fields.append(node('dt', '', label), node('dd', '', value));
+    }
+    details.addEventListener('toggle', () => { if (details.isConnected) details.open ? expandedTasks.add(task.id) : expandedTasks.delete(task.id); });
+    details.append(summary, fields, node('p', 'owner-muted', '현재 연결에서 제공하는 업무 기록입니다. 업무 본문과 실행 로그는 아직 제공되지 않습니다.'));
+    card.append(details);
+    return card;
+  }
+  function jobCard(job) {
+    const row = node('article', 'owner-job');
+    row.dataset.jobId = job.id;
+    row.dataset.profile = job.profile;
+    const top = node('div', 'owner-task-meta');
+    top.append(node('strong', '', `${NAMES[job.profile] || job.profile} · 반복 일정`),
+      node('span', job.error.present ? 'owner-job-error' : '', job.error.present ? '최근 실행 오류' : job.enabled ? '활성' : '중지됨'));
+    row.append(top, node('p', 'owner-record-id', `일정 ID · ${job.id}`),
+      node('p', '', `다음 실행 ${date(job.next_run_at)}`),
+      node('p', 'owner-muted', `최근 실행 ${date(job.last_run_at)} · ${job.last_status === 'ok' ? '성공' : job.last_status === 'error' ? '오류' : job.last_status || '미확인'}`));
+    if (job.schedule_display) row.append(node('code', 'owner-schedule', job.schedule_display));
+    return row;
+  }
+  function renderAttention() {
+    const overview = aggregateOwnerOverview(state);
+    content.append(node('p', 'owner-scope', '주 보드(보관 제외)의 막힌 업무·검토 업무와 기본 프로필·로디·자비스 일정의 최근 오류를 모았습니다. 검토 상태가 사용자 승인 요청을 뜻하지는 않습니다.'));
+    const current = node('section', 'owner-attention-group');
+    current.append(node('h3', '', `현재 확인한 항목 ${overview.currentItems.length}개`));
+    if (!overview.currentItems.length) {
+      current.append(node('p', 'owner-muted', overview.attentionComplete
+        ? '확인한 보드와 일정에는 막힘·검토·최근 오류 항목이 없습니다.'
+        : '전체 확인이 끝나지 않았습니다. 미확인 자료를 0건으로 판단하지 않습니다.'));
+    }
+    for (const item of overview.currentItems.slice(0, limit)) {
+      const card = item.kind === 'task' ? taskCard(item.task) : jobCard(item.job);
+      card.dataset.attentionKey = item.key;
+      current.append(card);
+    }
+    if (overview.currentItems.length > limit) current.append(button(`현재 항목 더 보기 · ${limit} / ${overview.currentItems.length}`, () => { limit += 30; render(); }, 'owner-more'));
+    content.append(current);
+    if (overview.staleItems.length) {
+      const stale = node('section', 'owner-attention-group owner-attention-stale');
+      stale.append(node('h3', '', `마지막 확인 기록 ${overview.staleItems.length}개`),
+        node('p', 'owner-warning', '확인이 만료된 기록입니다. 지금도 막혀 있거나 오류인지 다시 확인이 필요합니다.'));
+      for (const item of overview.staleItems.slice(0, limit)) {
+        const card = item.kind === 'task' ? taskCard(item.task) : jobCard(item.job);
+        card.dataset.attentionKey = item.key;
+        card.append(node('p', 'owner-muted', `마지막 성공 ${date(item.lastSuccessAt)}`));
+        stale.append(card);
+      }
+      if (overview.staleItems.length > limit) stale.append(button(`지난 기록 더 보기 · ${limit} / ${overview.staleItems.length}`, () => { limit += 30; render(); }, 'owner-more'));
+      content.append(stale);
+    }
+    const collection = node('section', 'owner-collection');
+    collection.append(node('h3', '', '자료 수집 상태'), node('p', 'owner-muted', '로그인한 이 페이지가 보이는 동안 15초마다 자동 확인합니다. 작업실을 닫아도 이어집니다.'));
+    for (const resource of overview.resources) {
+      const row = node('div', 'owner-collection-row');
+      row.append(node('strong', '', RESOURCE_NAMES[resource.key]));
+      freshness(resource.key, row);
+      if (resource.state === 'stale') row.append(node('p', 'owner-muted', resource.reason === 'expired' || resource.reason === 'source_stale'
+        ? '이전 성공 기록의 유효 시간이 지났습니다.' : '최근 조회에 실패했습니다. 마지막 성공 기록만 남아 있습니다.'));
+      else if (['error', 'transport-error'].includes(resource.state)) row.append(node('p', 'owner-collection-error', '자료를 가져오지 못했습니다. 업무 실패나 0건을 뜻하지 않습니다.'));
+      else if (resource.state === 'unknown') row.append(node('p', 'owner-muted', '현재 상태를 확인하지 못했습니다.'));
+      collection.append(row);
+    }
+    content.append(collection);
+  }
   function renderBoard() {
     const view = state.resources.board;
     freshness('board', content);
@@ -174,12 +262,7 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
     if (!tasks.length) { empty('이 조건에 맞는 업무가 없어요', '주민이나 상태 필터를 바꿔볼 수 있어요.'); return; }
     const list = node('div', 'owner-task-list');
     for (const task of tasks.slice(0, limit)) {
-      const card = node('article', 'owner-task');
-      const meta = node('div', 'owner-task-meta');
-      const badge = node('span', `owner-task-status status-${task.status}`, STATUS[task.status]);
-      meta.append(badge, node('span', '', NAMES[task.assignee] || task.assignee || '미배정'));
-      card.append(meta, node('h3', '', task.title), node('p', 'owner-task-date', `${task.completed_at ? '완료' : task.started_at ? '시작' : '생성'} ${date(task.completed_at || task.started_at || task.created_at)}`));
-      list.append(card);
+      list.append(taskCard(task));
     }
     content.append(list);
     if (tasks.length > limit) content.append(button(`업무 더 보기 · ${Math.min(limit, tasks.length)} / ${tasks.length}`, () => { limit += 30; render(); }, 'owner-more'));
@@ -195,14 +278,7 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
       else {
         group.append(node('p', 'owner-muted', `조회된 일정 ${view.data.count}개${view.state === 'stale' ? ' · 마지막 확인 기록' : ''}`));
         if (!view.data.jobs.length) group.append(node('p', 'owner-muted', '등록된 일정이 없습니다.'));
-        view.data.jobs.forEach((job, index) => {
-          const row = node('article', 'owner-job');
-          const top = node('div', 'owner-task-meta');
-          top.append(node('strong', '', `반복 일정 ${index + 1}`), node('span', job.error.present ? 'owner-job-error' : '', job.error.present ? '최근 실행 오류' : job.enabled ? '활성' : '중지됨'));
-          row.append(top, node('p', '', `다음 실행 ${date(job.next_run_at)}`), node('p', 'owner-muted', `최근 실행 ${date(job.last_run_at)} · ${job.last_status === 'ok' ? '성공' : job.last_status === 'error' ? '오류' : job.last_status || '미확인'}`));
-          if (job.schedule_display) row.append(node('code', 'owner-schedule', job.schedule_display));
-          group.append(row);
-        });
+        view.data.jobs.forEach((job) => group.append(jobCard(job)));
       }
       content.append(group);
     }
@@ -222,7 +298,8 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
     empty('열 수 있는 파일이 없어요', '현재는 로디의 실행 요약만 확인할 수 있어요.');
   }
   function render() {
-    if (!state) return;
+    if (!state || disposed) return;
+    if (!state.authenticated) expandedTasks.clear();
     const scrollTop = lastRenderedTab === tab ? content.scrollTop : 0;
     const activeId = panel.contains(document.activeElement) ? document.activeElement.id : '';
     login.hidden = state.authenticated;
@@ -241,8 +318,9 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
     context.textContent = agent && tab === 'board' ? `${NAMES[agent] || agent}의 업무` : '우리 마을의 업무 기록';
     content.setAttribute('aria-labelledby', `ownerTab-${tab}`);
     content.replaceChildren();
-    if (state.authenticated && !document.hidden) {
-      if (tab === 'board') renderBoard();
+    if (open && state.authenticated && !document.hidden) {
+      if (tab === 'attention') renderAttention();
+      else if (tab === 'board') renderBoard();
       else if (tab === 'jobs') renderJobs();
       else renderResults();
       updateFreshness();
@@ -252,27 +330,47 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
     lastRenderedTab = tab;
   }
   async function reload() {
-    if (!state.authenticated || refreshing) return;
+    if (disposed || document.hidden || !state.authenticated) return;
+    if (reloadPromise) return reloadPromise;
     refreshing = true; render();
-    try { await client.refreshAll(); } finally { refreshing = false; state = client.snapshot(); render(); }
+    reloadPromise = (async () => {
+      try { await client.refreshAll(); }
+      finally { refreshing = false; reloadPromise = null; state = client.snapshot(); render(); }
+    })();
+    return reloadPromise;
+  }
+  async function resumeSession() {
+    if (disposed || document.hidden) return;
+    if (sessionPromise) return sessionPromise;
+    sessionPromise = (async () => {
+      // A visibility transition must not cancel a previous reload and then
+      // accidentally suppress its replacement because refreshing is still true.
+      if (reloadPromise) await reloadPromise;
+      if (disposed || document.hidden) return;
+      await client.checkSession();
+      if (!disposed && !document.hidden && state.authenticated) await reload();
+    })().finally(() => { sessionPromise = null; });
+    return sessionPromise;
   }
   async function show(options = {}) {
     onOpen();
     opener = document.activeElement;
-    tab = options.tab || 'board';
+    tab = options.tab || 'attention';
     agent = options.agent || '';
     filter = ''; limit = 30;
     open = true; panel.hidden = false; panel.inert = false;
     launch.setAttribute('aria-expanded', 'true');
     document.body.classList.add('owner-panel-open');
     render();
-    if (!state.authenticated) await client.checkSession();
+    const hadSession = state.authenticated;
+    if (!hadSession) await resumeSession();
     if (!open) return;
     (state.authenticated ? close : password).focus({ preventScroll: true });
-    if (state.authenticated) await reload();
+    if (hadSession && state.authenticated) await reload();
   }
   function hide(restoreFocus = false) {
     open = false; panel.hidden = true; panel.inert = true;
+    content.replaceChildren();
     document.body.classList.remove('owner-panel-open');
     launch.setAttribute('aria-expanded', 'false');
     if (restoreFocus) (opener?.isConnected ? opener : launch).focus({ preventScroll: true });
@@ -288,12 +386,33 @@ export function initOwnerWorkspace({ onOpen = () => {}, preview = false } = {}) 
   const keyboard = (event) => { if (open && event.key === 'Escape') { event.preventDefault(); hide(true); } };
   document.addEventListener('keydown', keyboard);
   const visibility = () => {
+    state = client.tick();
+    onStateChange(state);
     if (document.hidden) { content.replaceChildren(); return; }
-    if (open) { render(); if (state.authenticated) client.checkSession().then(() => { if (state.authenticated) reload(); }); }
+    render();
+    resumeSession();
   };
   document.addEventListener('visibilitychange', visibility);
-  const freshTimer = setInterval(() => { if (open && !document.hidden) updateFreshness(); }, 1000);
-  const pollTimer = setInterval(() => { if (open && !document.hidden && state.authenticated) reload(); }, 15000);
+  const freshTimer = setInterval(() => {
+    if (disposed || document.hidden) return;
+    const previous = state;
+    state = client.tick();
+    onStateChange(state);
+    const changed = previous.authenticated !== state.authenticated
+      || Object.keys(state.resources).some((key) => previous.resources[key]?.state !== state.resources[key].state);
+    if (changed) render(); else updateFreshness();
+  }, 1000);
+  const pollTimer = setInterval(() => { if (!disposed && !document.hidden && state.authenticated) reload(); }, 15000);
   render();
-  return { open: show, close: hide, refresh: reload, destroy() { clearInterval(freshTimer); clearInterval(pollTimer); document.removeEventListener('keydown', keyboard); document.removeEventListener('visibilitychange', visibility); client.dispose(); panel.remove(); launch.remove(); } };
+  onStateChange(state);
+  resumeSession();
+  return { open: show, close: hide, refresh: reload, destroy() {
+    if (disposed) return;
+    disposed = true;
+    clearInterval(freshTimer); clearInterval(pollTimer);
+    document.removeEventListener('keydown', keyboard); document.removeEventListener('visibilitychange', visibility);
+    client.dispose();
+    onStateChange(client.snapshot());
+    panel.remove(); launch.remove();
+  } };
 }

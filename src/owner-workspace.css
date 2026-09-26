@@ -46,6 +46,25 @@ body.intro-active .owner-launch { display: none; }
 .owner-task-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; color: #6d7e6b; }
 .owner-task h3 { font-size: 13px; line-height: 1.65; margin: 9px 0 6px; overflow-wrap: anywhere; }
 .owner-task-date { font-size: 10px; color: #8b9486; }
+.owner-task-details { margin-top: 10px; border-top: 1px solid #e7ebdf; padding-top: 9px; }
+.owner-task-details summary { cursor: pointer; color: #587361; font-size: 11px; font-weight: 700; }
+.owner-task-details dl { display: grid; grid-template-columns: 55px minmax(0, 1fr); gap: 7px 10px; margin: 12px 0; font-size: 11px; line-height: 1.6; }
+.owner-task-details dt { color: #7a8875; }
+.owner-task-details dd { margin: 0; overflow-wrap: anywhere; }
+.owner-task-details summary:focus-visible { outline: 2px solid #648c71; outline-offset: 3px; border-radius: 3px; }
+.owner-attention-group { display: grid; gap: 10px; margin-bottom: 22px; }
+.owner-attention-group > h3, .owner-collection > h3 { font-size: 14px; margin: 0 0 3px; }
+.owner-attention-group > .owner-job { margin-top: 0; }
+.owner-attention-stale { border-top: 1px dashed #d8ccad; padding-top: 18px; }
+.owner-attention-stale .owner-task, .owner-attention-stale .owner-job { background: #faf6eb; }
+.owner-attention-stale > .owner-warning { margin: 0; }
+.owner-collection { border-top: 1px solid #dfe5d8; padding-top: 18px; }
+.owner-collection-row { padding: 10px 0; border-bottom: 1px solid #e7ebdf; }
+.owner-collection-row > strong { display: block; font-size: 11px; margin-bottom: 7px; }
+.owner-collection-row .owner-freshness { margin-bottom: 0; }
+.owner-collection-row > p { margin-top: 6px; }
+.owner-collection-error { font-size: 11px; line-height: 1.7; color: #a05e4b; }
+.owner-record-id { font-size: 10px !important; color: #82907c; overflow-wrap: anywhere; }
 .owner-task-status { font-size: 10px; font-weight: 700; background: #edf0e7; padding: 3px 7px; border-radius: 5px; }
 .owner-task-status.status-running { background: #e7eed2; color: #677a34; }
 .owner-task-status.status-blocked, .owner-task-status.status-review { background: #f3e7d3; color: #906836; }

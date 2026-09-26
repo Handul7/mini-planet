@@ -25,6 +25,7 @@ import {
 } from './world/harbor-kit.js?v=114';
 import { createAgentStatusSource } from './status-source.js?v=70';
 import { initOwnerWorkspace } from './owner-workspace.js';
+import { projectOwnerVillage } from './owner-village.js';
 import { createSkySystem } from './sky.js?v=114';
 import { prepareSeasonalGround } from './seasonal-surfaces.js?v=114';
 import { createAmbientAudio } from './ambient-audio.js?v=104';
@@ -58,6 +59,8 @@ const URL_PARAMS = new URLSearchParams(location.search);
 // A view selector, never authentication. The same-origin host verifies sessions.
 const OWNER_MODE = URL_PARAMS.get('owner') === '1';
 let ownerWorkspace = null;
+let ownerSnapshot = null;
+let ownerStateChanged = () => {};
 if (OWNER_MODE) document.body.classList.add('owner-runtime');
 const villageBoard = await createVillageBoard();
 const DEV_TIME_SHIFT_MS = URL_PARAMS.has('dev')
@@ -9135,6 +9138,7 @@ addEventListener('keydown', anyKeyStart);
 if (OWNER_MODE) {
   ownerWorkspace = initOwnerWorkspace({
     preview: URL_PARAMS.get('ownerPreview') === '1',
+    onStateChange(snapshot) { ownerSnapshot = snapshot; ownerStateChanged(); },
     onOpen() { resetTransientControls(); dashboardStopPatrol(); dashboardCloseCard(); dashboardCloseTeam(); closeServicePanel(); closeVisitorPanels(); },
   });
   document.getElementById('startBtn')?.addEventListener('click', () => ownerWorkspace.open());
@@ -9332,6 +9336,7 @@ if (OWNER_MODE) {
   }
 
   function renderStatusFreshness() {
+    if (OWNER_MODE) { renderOwnerVillage(); return; }
     if (!freshnessEl) return;
     const now = Date.now();
     const checked = lastStatusReceivedAt ? timeAgo(lastStatusReceivedAt).replace(' 갱신', '') : '';
@@ -9372,6 +9377,7 @@ if (OWNER_MODE) {
   }
 
   function renderConnectionBadge() {
+    if (OWNER_MODE) { renderOwnerVillage(); return; }
     if (!connectionEl) return;
     let state = connectionState;
     let label = ({ live: '실시간', polling: '주기 확인', loading: '연결 중', offline: '오프라인' })[state] || state;
@@ -9722,6 +9728,7 @@ if (OWNER_MODE) {
     chips[a.key] = chip;
   }
   function refreshBar() {
+    if (OWNER_MODE) { renderOwnerVillage(); return; }
     for (const a of AGENTS) {
       const st = chips[a.key].querySelector('.chip-state');
       if (st) {
@@ -9733,6 +9740,33 @@ if (OWNER_MODE) {
     }
     if (openAgent) renderCard(openAgent);   // keep an open card in sync
   }
+
+  function renderOwnerVillage() {
+    const view = projectOwnerVillage(ownerSnapshot, AGENTS.map((a) => a.key), { hidden: document.hidden });
+    for (const a of AGENTS) {
+      const chip = chips[a.key];
+      if (!chip) continue;
+      const resident = view.residents[a.key];
+      const text = chip.querySelector('.chip-state');
+      if (text) { text.textContent = resident.label; text.style.color = resident.needsAttention ? '#906836' : ''; }
+      chip.title = resident.detail;
+      chip.setAttribute('aria-label', `${a.kor || a.name} · ${resident.label}`);
+      chip.classList.remove('busy');
+    }
+    if (connectionEl) {
+      connectionEl.className = `status-connection ${view.state === 'current' ? 'polling' : 'stale'}`;
+      connectionEl.textContent = ({ current: '15초 자동조회', waiting: '업무 확인 중', unavailable: '보드 확인 지연', locked: '로그인 후 조회' })[view.state];
+    }
+    if (freshnessEl) {
+      freshnessEl.classList.toggle('stale', view.state === 'unavailable');
+      freshnessEl.textContent = view.state === 'current'
+        ? `보드 ${timeAgo(view.lastSuccessAt)} · 전체 활동은 미확인`
+        : view.state === 'locked' ? '로그인하면 마을에서도 업무를 자동 확인합니다.'
+          : view.lastSuccessAt ? `보드 마지막 확인 ${timeAgo(view.lastSuccessAt).replace(' 갱신', '')} · 작업실에서 연결 확인`
+            : '첫 업무 보드를 확인하고 있습니다.';
+    }
+  }
+  if (OWNER_MODE) { ownerStateChanged = renderOwnerVillage; renderOwnerVillage(); }
 
   // ---- 3D에서 에이전트 클릭 → 카드 (플레이 모드 전용) ----
   let clickStart = null;
