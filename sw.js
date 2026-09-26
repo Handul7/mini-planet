@@ -2,7 +2,7 @@
 // Same-origin code is network-first so releases do not stick.
 const CACHE_PREFIX = 'handul-planet-';
 // Keep the public release version while invalidating caches from before owner mode.
-const CACHE = CACHE_PREFIX + 'v119' + '-owner-1';
+const CACHE = CACHE_PREFIX + 'v119' + '-owner-2';
 const SHELL = [
   './',
   './index.html',
@@ -43,6 +43,7 @@ const SHELL = [
   './src/agent-results.js?v=60',
   './src/agent-signatures.js?v=72',
   './src/input-controls.js?v=119',
+  './src/nearby-interaction.js',
   './src/style.css?v=119',
   './favicon.ico',
   './assets/icons/icon-192.png',

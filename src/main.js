@@ -33,6 +33,7 @@ import { createPerformanceGovernor } from './performance.js?v=119';
 import { createAgentSeparation } from './agent-separation.js?v=115';
 import { signatureForAgent } from './agent-signatures.js?v=72';
 import { readGamepadControls, createOrbitGesture, bindVirtualJoystick, wheelPixels } from './input-controls.js?v=119';
+import { selectNearbyInteraction } from './nearby-interaction.js';
 import {
   cleanPublicText,
   evaluateSnapshotFreshness,
@@ -7081,6 +7082,7 @@ let dashboardUpdatePatrol = () => {}; // optional read-only monitoring tour
 let dashboardStopPatrol = () => {};
 let dashboardPatrolState = () => ({ enabled: false });
 let dashboardOpenAgentByIndex = () => {};
+let openNearbyAgent = () => {};         // same resident view as clicking, staying in explore mode
 let openServicePanel = () => {};        // assigned by the service-panel wiring below
 let closeServicePanel = () => {};       // "
 let refreshOpenServicePanel = () => {};
@@ -7348,7 +7350,7 @@ let stickVec = { x: 0, y: 0 };
 const joystickControls = bindVirtualJoystick({
   stick: document.getElementById('stick'), knob: document.getElementById('knob'), vector: stickVec,
   enabled: () => !editMode && experienceMode === 'explore'
-    && !document.body.matches('.agent-detail-open, .service-detail-open, .team-overview-open')
+    && !document.body.matches('.agent-detail-open, .service-detail-open, .team-overview-open, .owner-panel-open')
     && !villageBoard.isOpen() && !roseStory.isOpen(),
 });
 function resetTransientControls() {
@@ -7385,7 +7387,7 @@ function pollGamepadInput(dt) {
     gamepadSnapshot = next;
     return next;
   }
-  if (villageBoard.isOpen() || roseStory.isOpen()) {
+  if (villageBoard.isOpen() || roseStory.isOpen() || document.body.classList.contains('owner-panel-open')) {
     gamepadJumpHeld = next.jump;
     gamepadInteractHeld = next.interact;
     gamepadSnapshot = next;
@@ -8421,7 +8423,7 @@ function animate(dt, elapsed, now) {
 
   // ---- movement input: W/S = forward/backstep along facing · A/D = turn ----
   let fwd = 0, turn = 0;
-  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen()) {
+  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen() && !document.body.classList.contains('owner-panel-open')) {
     if (keys['w'] || keys['arrowup'])    fwd += 1;
     if (keys['s'] || keys['arrowdown'])  fwd -= 1;
     if (keys['a'] || keys['arrowleft'])  turn += 1;
@@ -8448,7 +8450,7 @@ function animate(dt, elapsed, now) {
   }
 
   // ---- jump physics (vertical hop above the surface) ----
-  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen() && !activeBoatItem && jumpRequested && onGround) {
+  if (experienceMode === 'explore' && !villageBoard.isOpen() && !roseStory.isOpen() && !document.body.classList.contains('owner-panel-open') && !activeBoatItem && jumpRequested && onGround) {
     jumpVel = JUMP_SPEED; onGround = false;
   }
   jumpRequested = false;
@@ -9083,7 +9085,7 @@ addEventListener('keydown', anyKeyStart);
 if (OWNER_MODE) {
   ownerWorkspace = initOwnerWorkspace({
     preview: URL_PARAMS.get('ownerPreview') === '1',
-    onOpen() { dashboardStopPatrol(); dashboardCloseCard(); dashboardCloseTeam(); closeServicePanel(); closeVisitorPanels(); },
+    onOpen() { resetTransientControls(); dashboardStopPatrol(); dashboardCloseCard(); dashboardCloseTeam(); closeServicePanel(); closeVisitorPanels(); },
   });
   document.getElementById('startBtn')?.addEventListener('click', () => ownerWorkspace.open());
 }
@@ -9558,6 +9560,12 @@ if (OWNER_MODE) {
     dashboardStopPatrol();
     closeServicePanel();
     setExperienceMode('dashboard');
+    openAgentCard(agent);
+  };
+  openNearbyAgent = (agent) => {
+    resetTransientControls();
+    dashboardStopPatrol();
+    closeServicePanel();
     openAgentCard(agent);
   };
 
@@ -10157,8 +10165,7 @@ if (OWNER_MODE) {
   const resultsPane = el('resultsPane');
   const mobileInteractBtn = el('mobileInteractBtn');
   let openFor = null;          // agent whose panel is open
-  let nearAgent = null;        // agent whose door we're standing at
-  let nearBoat = null;
+  let nearbyInteraction = null;
   let interactionPromptKey = '';
   let servicePanelOpener = null;
   const serviceSelect = el('serviceSelect');
@@ -10336,44 +10343,50 @@ if (OWNER_MODE) {
   refreshOpenServicePanel = () => { if (openFor) renderHomeResults(openFor); };
   el('serviceClose').addEventListener('click', () => closeServicePanel(true));
 
-  // ---- 입장 프롬프트 (문 앞 감지는 메인 루프가 매 프레임 호출) ----
-  // The trigger follows the actual front-door offset, not the building center.
-  // This keeps the passing loop quiet while leaving a comfortable tap radius.
-  const ENTER_ANGLE = 0.18;
+  // One target for keyboard, touch and gamepad. Boats keep their existing
+  // priority; a nearby resident can be addressed before entering their house.
   updateServiceProximity = function () {
-    let best = null, bestD = ENTER_ANGLE;
-    let boat = activeBoatItem;
-    if (!editMode && !openFor && experienceMode === 'explore') {
-      if (!boat) boat = nearestBoardableBoat();
-      if (!boat) {
-        for (const a of AGENTS) {
-          const doorDir = homeDoorDir(a.home);
-          if (!doorDir) continue;
-          const d = playerDir.angleTo(doorDir);
-          if (d < bestD) { best = a; bestD = d; }
+    const blocked = editMode || openFor || experienceMode !== 'explore' || cameraIntro || intro.isConnected
+      || villageBoard.isOpen() || roseStory.isOpen()
+      || document.body.matches('.agent-detail-open, .service-detail-open, .team-overview-open, .owner-panel-open');
+    const residents = [], homes = [];
+    if (!blocked) {
+      for (const agent of AGENTS) {
+        if (agent.npc?.visible && agent.npc.userData.dir) {
+          residents.push({ target: agent, distance: playerDir.angleTo(agent.npc.userData.dir) });
         }
+        const doorDir = homeDoorDir(agent.home);
+        if (doorDir) homes.push({ target: agent, distance: playerDir.angleTo(doorDir) });
       }
     }
-    const promptKey = activeBoatItem ? 'boat-exit' : boat ? 'boat-enter' : best?.key || '';
-    nearAgent = best;
-    nearBoat = boat;
+    nearbyInteraction = selectNearbyInteraction({
+      blocked, activeBoat: activeBoatItem,
+      nearbyBoat: !blocked && !activeBoatItem ? nearestBoardableBoat() : null,
+      residents, homes,
+    });
+    const resident = nearbyInteraction?.kind === 'resident' ? nearbyInteraction.target : null;
+    const best = nearbyInteraction?.kind === 'home' ? nearbyInteraction.target : null;
+    const boat = nearbyInteraction?.kind.startsWith('boat-') ? nearbyInteraction.target : null;
+    const promptKey = nearbyInteraction ? `${nearbyInteraction.kind}:${resident?.key || best?.key || ''}` : '';
     if (promptKey === interactionPromptKey) return;
     interactionPromptKey = promptKey;
     if (mobileInteractBtn) {
       mobileInteractBtn.disabled = !promptKey;
-      const label = activeBoatItem
+      const label = boat && activeBoatItem
         ? '배에서 내리기'
         : boat
           ? '어선 승선'
-          : best
-            ? (best.service?.name || best.kor + '의 집') + ' 입장'
-            : '가까운 집 또는 배 이용';
+          : resident
+            ? `${resident.kor}에게 말 걸기`
+            : best
+              ? (best.service?.name || best.kor + '의 집') + ' 입장'
+              : '가까운 주민·집·배 이용';
       mobileInteractBtn.setAttribute('aria-label', label);
       mobileInteractBtn.title = label;
       const icon = mobileInteractBtn.querySelector('span');
-      if (icon) icon.textContent = activeBoatItem || boat ? '⛵' : '⌂';
+      if (icon) icon.textContent = boat ? '⛵' : resident ? '💬' : '⌂';
     }
-    if (activeBoatItem || boat) {
+    if (boat) {
       promptEl.textContent = '';
       const icon = document.createElement('span');
       icon.textContent = '⛵ ';
@@ -10382,6 +10395,19 @@ if (OWNER_MODE) {
       const hint = document.createElement('span');
       hint.className = 'enter-key';
       hint.textContent = activeBoatItem ? 'F 하선' : 'F 승선';
+      promptEl.append(icon, label, hint);
+      promptEl.classList.add('show');
+      promptEl.tabIndex = 0;
+      setInteractiveState(promptEl, true);
+    } else if (resident) {
+      promptEl.textContent = '';
+      const icon = document.createElement('span');
+      icon.textContent = '💬 ';
+      const label = document.createElement('b');
+      label.textContent = resident.kor;
+      const hint = document.createElement('span');
+      hint.className = 'enter-key';
+      hint.textContent = 'F 말 걸기';
       promptEl.append(icon, label, hint);
       promptEl.classList.add('show');
       promptEl.tabIndex = 0;
@@ -10407,19 +10433,23 @@ if (OWNER_MODE) {
     }
   };
   activateNearbyService = () => {
-    if (editMode || openFor || villageBoard.isOpen() || roseStory.isOpen() || experienceMode !== 'explore') return false;
-    if (activeBoatItem) return disembarkBoat();
-    if (nearBoat) return boardBoat(nearBoat);
-    if (!nearAgent) return false;
-    openServicePanel(nearAgent);
+    // A walking resident may have moved since the last frame's prompt.
+    updateServiceProximity();
+    if (!nearbyInteraction) return false;
+    const { kind, target } = nearbyInteraction;
+    if (kind === 'boat-exit') return disembarkBoat();
+    if (kind === 'boat-enter') return boardBoat(target);
+    if (kind === 'resident') openNearbyAgent(target);
+    else openServicePanel(target);
+    updateServiceProximity();
     return true;
   };
   promptEl.addEventListener('click', activateNearbyService);
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     // Korean IMEs may report either the consonant or Process with KeyF.
-    const boatKey = (activeBoatItem || nearBoat) && (k === '\u3139' || e.code === 'KeyF');
-    if ((k === 'f' || boatKey) && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
+    const interactionKey = k === 'f' || k === '\u3139' || e.code === 'KeyF';
+    if (interactionKey && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey
         && !isUiInteractionTarget(e.target)) activateNearbyService();
     else if (k === 'escape') closeServicePanel(true);
   });
@@ -10447,6 +10477,16 @@ if (URL_PARAMS.has('dev')) {
       beginGame('explore', { cinematic: false });
       commitPlayerSurfaceDirection(offsetSurfaceDir(NORTH_POLE, new THREE.Vector3(1, 0, 0), 0.20));
       playerForward.copy(NORTH_POLE).addScaledVector(playerDir, -NORTH_POLE.dot(playerDir)).normalize();
+      camDir.copy(playerForward);
+    });
+  } else if (URL_PARAMS.get('qaView') === 'resident') {
+    queueMicrotask(() => {
+      const agent = AGENTS.find((entry) => entry.key === URL_PARAMS.get('qaAgent'));
+      const dir = agent?.npc?.userData.dir;
+      if (!dir) return;
+      beginGame('explore', { cinematic: false });
+      commitPlayerSurfaceDirection(offsetSurfaceDir(dir, propFacing(dir, 0), 0.10));
+      playerForward.copy(dir).addScaledVector(playerDir, -dir.dot(playerDir)).normalize();
       camDir.copy(playerForward);
     });
   }
