@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mini-planet.invalid/schema/controller-responses.schema.json",
+  "title": "Mini Planet route responses",
+  "oneOf": [
+    {"$ref": "#/$defs/statusResponse"},
+    {"$ref": "#/$defs/boardEnvelope"},
+    {"$ref": "#/$defs/jobsEnvelope"},
+    {"$ref": "#/$defs/resultsEnvelope"},
+    {"$ref": "#/$defs/failureEnvelope"},
+    {"$ref": "#/$defs/unsupportedResponse"},
+    {"$ref": "#/$defs/boundaryError"}
+  ],
+  "$defs": {
+    "dateTimeOrNull": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+    "resident": {
+      "type": "object", "additionalProperties": false,
+      "required": ["overall_activity", "running_board_count"],
+      "properties": {
+        "overall_activity": {"const": "unknown"},
+        "running_board_count": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "task": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "status", "assignee", "created_at", "started_at", "completed_at"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "title": {"type": "string", "minLength": 1},
+        "status": {"enum": ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"]},
+        "assignee": {"type": ["string", "null"], "minLength": 1},
+        "created_at": {"$ref": "#/$defs/dateTimeOrNull"}, "started_at": {"$ref": "#/$defs/dateTimeOrNull"},
+        "completed_at": {"$ref": "#/$defs/dateTimeOrNull"}
+      }
+    },
+    "counts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"],
+      "properties": {
+        "triage": {"type": "integer", "minimum": 0}, "todo": {"type": "integer", "minimum": 0},
+        "scheduled": {"type": "integer", "minimum": 0}, "ready": {"type": "integer", "minimum": 0},
+        "running": {"type": "integer", "minimum": 0}, "blocked": {"type": "integer", "minimum": 0},
+        "review": {"type": "integer", "minimum": 0}, "done": {"type": "integer", "minimum": 0}
+      }
+    },
+    "envelopeBase": {
+      "type": "object",
+      "required": ["source", "status", "observed_at", "last_success_at", "expires_at", "stale", "error", "data"],
+      "properties": {
+        "source": {"const": "dashboard"}, "status": {"enum": ["ok", "stale", "error"]},
+        "observed_at": {"type": "string", "format": "date-time"}, "last_success_at": {"$ref": "#/$defs/dateTimeOrNull"},
+        "expires_at": {"$ref": "#/$defs/dateTimeOrNull"}, "stale": {"type": "boolean"},
+        "error": {"type": ["string", "null"]}, "data": {}
+      }
+    },
+    "boardEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/envelopeBase"},
+        {"type": "object", "additionalProperties": false, "required": ["resident"],
+         "properties": {"source": {}, "status": {}, "observed_at": {}, "last_success_at": {}, "expires_at": {}, "stale": {}, "error": {},
+           "resident": {"$ref": "#/$defs/resident"},
+           "data": {"type": "object", "additionalProperties": false,
+             "required": ["scope", "counts", "task_count", "archived_total", "tasks", "resident"],
+             "properties": {
+               "scope": {"type": "object", "additionalProperties": false, "required": ["board", "include_archived"],
+                         "properties": {"board": {"const": "default"}, "include_archived": {"const": false}}},
+               "counts": {"$ref": "#/$defs/counts"}, "task_count": {"type": "integer", "minimum": 0},
+               "archived_total": {"type": "null"}, "tasks": {"type": "array", "items": {"$ref": "#/$defs/task"}},
+               "resident": {"$ref": "#/$defs/resident"}
+             }}
+         }}
+      ]
+    },
+    "job": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "profile", "enabled", "schedule_display", "last_run_at", "next_run_at", "last_status", "error"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "profile": {"enum": ["default", "rodi", "jarvis"]},
+        "enabled": {"type": "boolean"}, "schedule_display": {"type": ["string", "null"]},
+        "last_run_at": {"$ref": "#/$defs/dateTimeOrNull"}, "next_run_at": {"$ref": "#/$defs/dateTimeOrNull"},
+        "last_status": {"type": ["string", "null"]},
+        "error": {"type": "object", "additionalProperties": false, "required": ["present"], "properties": {"present": {"type": "boolean"}}}
+      }
+    },
+    "registry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["default", "rodi", "jarvis", "yul", "ludwig", "anne", "argos"],
+      "properties": {
+        "default": {"type": ["integer", "null"], "minimum": 0}, "rodi": {"type": ["integer", "null"], "minimum": 0},
+        "jarvis": {"type": ["integer", "null"], "minimum": 0}, "yul": {"type": ["integer", "null"], "minimum": 0},
+        "ludwig": {"type": ["integer", "null"], "minimum": 0}, "anne": {"type": ["integer", "null"], "minimum": 0},
+        "argos": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "jobsEnvelope": {
+      "allOf": [{"$ref": "#/$defs/envelopeBase"},
+        {"type": "object", "additionalProperties": false,
+         "properties": {"source": {}, "status": {}, "observed_at": {}, "last_success_at": {}, "expires_at": {}, "stale": {}, "error": {},
+           "data": {"type": "object", "additionalProperties": false, "required": ["profile", "count", "jobs", "registry"],
+             "properties": {"profile": {"enum": ["default", "rodi", "jarvis"]}, "count": {"type": "integer", "minimum": 0},
+               "jobs": {"type": "array", "items": {"$ref": "#/$defs/job"}}, "registry": {"$ref": "#/$defs/registry"}}}}}]
+    },
+    "resultsEnvelope": {
+      "allOf": [{"$ref": "#/$defs/envelopeBase"},
+        {"type": "object", "additionalProperties": false,
+         "properties": {"source": {}, "status": {}, "observed_at": {}, "last_success_at": {}, "expires_at": {}, "stale": {}, "error": {},
+           "data": {"type": "object", "additionalProperties": false,
+             "required": ["profile", "task_status", "latest_summary", "run", "attachments", "attachments_status"],
+             "properties": {"profile": {"const": "rodi"}, "task_status": {"type": ["string", "null"]},
+               "latest_summary": {"type": ["string", "null"]}, "attachments": {"type": "array", "maxItems": 0},
+               "attachments_status": {"const": "unavailable"},
+               "run": {"type": "object", "additionalProperties": false,
+                 "required": ["profile", "status", "summary", "started_at", "completed_at"],
+                 "properties": {"profile": {"const": "rodi"}, "status": {"type": ["string", "null"]},
+                   "summary": {"type": ["string", "null"]}, "started_at": {"$ref": "#/$defs/dateTimeOrNull"},
+                   "completed_at": {"$ref": "#/$defs/dateTimeOrNull"}}}}}}}]
+    },
+    "failureEnvelope": {
+      "allOf": [{"$ref": "#/$defs/envelopeBase"},
+        {"type": "object", "additionalProperties": false,
+         "properties": {"source": {}, "status": {"const": "error"}, "observed_at": {}, "last_success_at": {"type": "null"},
+           "expires_at": {"type": "null"}, "stale": {"const": true}, "error": {"type": "string"}, "data": {"type": "null"}}}]
+    },
+    "unsupportedResponse": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "status", "observed_at", "last_success_at", "expires_at", "stale", "error", "data", "files"],
+      "properties": {"source": {"const": "dashboard"}, "status": {"const": "unsupported"},
+        "observed_at": {"type": "string", "format": "date-time"}, "last_success_at": {"type": "null"},
+        "expires_at": {"type": "null"}, "stale": {"const": false}, "error": {"type": "string"},
+        "data": {"type": "null"}, "files": {"type": "null"}}
+    },
+    "statusResponse": {
+      "type": "object", "additionalProperties": false, "required": ["controller", "resident", "resources"],
+      "properties": {
+        "controller": {"type": "object", "additionalProperties": false, "required": ["reachable", "status", "upstream", "instance_id"],
+          "properties": {"reachable": {"const": true}, "status": {"const": "ok"},
+            "upstream": {"type": "string", "format": "uri", "pattern": "^http://127\\.0\\.0\\.1:[0-9]+$"},
+            "instance_id": {"type": "string", "minLength": 1}}},
+        "resident": {"$ref": "#/$defs/resident"},
+        "resources": {"type": "object", "additionalProperties": false,
+          "required": ["board", "jobs:default", "jobs:rodi", "jobs:jarvis", "results:rodi"],
+          "properties": {
+            "board": {"$ref": "#/$defs/statusResource"},
+            "jobs:default": {"$ref": "#/$defs/statusResource"},
+            "jobs:rodi": {"$ref": "#/$defs/statusResource"},
+            "jobs:jarvis": {"$ref": "#/$defs/statusResource"},
+            "results:rodi": {"$ref": "#/$defs/statusResource"}
+          }}
+      }
+    },
+    "statusResource": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "status", "observed_at", "last_success_at", "expires_at", "stale", "last_attempt_at", "last_error"],
+      "properties": {
+        "source": {"const": "dashboard"},
+        "status": {"enum": ["unknown", "ok", "stale", "error"]},
+        "observed_at": {"$ref": "#/$defs/dateTimeOrNull"},
+        "last_success_at": {"$ref": "#/$defs/dateTimeOrNull"},
+        "expires_at": {"$ref": "#/$defs/dateTimeOrNull"},
+        "stale": {"type": ["boolean", "null"]},
+        "last_attempt_at": {"$ref": "#/$defs/dateTimeOrNull"},
+        "last_error": {"type": ["string", "null"]}
+      }
+    },
+    "boundaryError": {
+      "type": "object", "additionalProperties": false, "required": ["error"],
+      "properties": {"error": {"enum": ["invalid_host", "invalid_origin", "request_body_not_allowed", "invalid_content_length", "unauthorized", "method_not_allowed", "ambiguous_url", "query_not_allowed", "invalid_query", "unsupported_profile", "not_found"]}}
+    }
+  }
+}

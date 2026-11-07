@@ -29,16 +29,16 @@ test('F, Korean rieul and IME Process/KeyF activate boat boarding and disembarki
   }
 });
 
-test('unrelated keys and IME keys outside boat context do not activate', () => {
+test('unrelated keys do not activate; Korean F also works near residents and houses', () => {
   const controls = setup();
   controls.press({ key: '\u3141', code: 'KeyA' });
   assert.equal(controls.count(), 0);
   const noBoat = setup({ nearby: false });
   noBoat.press({ key: '\u3139' });
   noBoat.press({ key: 'Process', code: 'KeyF' });
-  assert.equal(noBoat.count(), 0);
+  assert.equal(noBoat.count(), 2);
   noBoat.press({ key: 'f' });
-  assert.equal(noBoat.count(), 1);
+  assert.equal(noBoat.count(), 3);
 });
 
 test('holding a key, browser shortcuts and typing in UI never toggle the boat', () => {

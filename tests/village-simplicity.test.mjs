@@ -17,7 +17,7 @@ vm.runInContext([
   source.slice(source.indexOf('const MAP_CENTER ='), source.indexOf('const DEFAULT_PLAYER_SPAWN_DIR =')),
   source.slice(source.indexOf('const AGENT_DISTRICT_ANCHORS ='), source.indexOf('const DASHBOARD_VIEW_DIR =')),
   source.slice(source.indexOf('function sphericalRing('), source.indexOf('// Home driveways are terrain')),
-  'this.before = VILLAGE_BALANCED_LAYOUT; this.after = DEFAULT_LAYOUT;',
+  'this.before = VILLAGE_BALANCED_LAYOUT; this.after = VILLAGE_SIMPLE_LAYOUT;',
 ].join('\n'), context);
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const seed = () => plain(context.before);

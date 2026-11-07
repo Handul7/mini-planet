@@ -1,0 +1,174 @@
+name: Release Mac mini owner UI
+
+# The Mac mini updater trusts this repository's protected main branch and CI.
+# This publishes public UI files only; no backend, password, or controller key.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: owner-ui-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+      - name: Sync public site metadata
+        run: node scripts/sync-site-metadata.mjs
+      - name: Validate public config and static app
+        run: node scripts/validate-predeploy.mjs
+      - name: Test dashboard contracts and release quality
+        run: node --test tests/*.test.mjs
+      - name: Test UI updater boundaries and rollback
+        run: python3 -B -m unittest discover -s tests -p test_owner_ui_update.py -v
+      - name: Build public UI
+        run: node scripts/build-site.mjs
+      - name: Stamp the served release identity
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          commit = os.environ['GITHUB_SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', commit):
+              raise SystemExit('Expected a full Git commit SHA.')
+          Path('_site/src/owner-release.json').write_text(json.dumps({'commit': commit, 'apiContract': 1}) + '\n')
+          PY
+      - name: Validate artifact boundary
+        run: node scripts/validate-site-artifact.mjs _site
+      - name: Package reproducible UI archive and manifest
+        run: |
+          python3 - <<'PY'
+          import gzip
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import tarfile
+
+          commit = os.environ['GITHUB_SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', commit):
+              raise SystemExit('Expected a full Git commit SHA.')
+          root = Path('_site')
+          output = Path(os.environ['RUNNER_TEMP']) / 'owner-ui-release'
+          output.mkdir()
+          archive = output / 'owner-ui.tar.gz'
+          # Normalize archive metadata so a rerun of this commit has the same hash.
+          with archive.open('wb') as raw:
+              with gzip.GzipFile(fileobj=raw, filename='', mode='wb', mtime=0) as compressed:
+                  with tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as bundle:
+                      for path in sorted(root.rglob('*')):
+                          info = bundle.gettarinfo(str(path), arcname=path.relative_to(root).as_posix())
+                          if not (info.isfile() or info.isdir()):
+                              raise SystemExit('UI archive may contain only regular files and directories.')
+                          info.uid = info.gid = info.mtime = 0
+                          info.uname = info.gname = ''
+                          info.mode = 0o755 if info.isdir() else 0o644
+                          if info.isfile():
+                              with path.open('rb') as stream:
+                                  bundle.addfile(info, stream)
+                          else:
+                              bundle.addfile(info)
+          manifest = {
+              'schemaVersion': 1,
+              'commit': commit,
+              'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+              'apiContract': 1,
+          }
+          (output / 'owner-ui.manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          print('Prepared owner-ui.tar.gz and owner-ui.manifest.json for', commit)
+          PY
+      - name: Publish prerelease or verify existing assets without changing them
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import urllib.error
+          import urllib.request
+
+          repository = os.environ['GITHUB_REPOSITORY']
+          commit = os.environ['GITHUB_SHA']
+          tag = 'owner-ui-' + commit
+          output = Path(os.environ['RUNNER_TEMP']) / 'owner-ui-release'
+          expected_manifest = json.loads((output / 'owner-ui.manifest.json').read_text())
+          expected_assets = ['owner-ui.manifest.json', 'owner-ui.tar.gz']
+
+          def api(path, *, missing_ok=False):
+              request = urllib.request.Request('https://api.github.com/repos/' + repository + '/' + path,
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'User-Agent': 'mini-planet-owner-ui-ci'})
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  if missing_ok and error.code == 404:
+                      return None
+                  raise SystemExit('GitHub API request failed with HTTP ' + str(error.code)) from None
+
+          release = api('releases/tags/' + tag, missing_ok=True)
+          tagged_commit = api('commits/' + tag, missing_ok=True)
+          if tagged_commit is not None and tagged_commit.get('sha') != commit:
+              raise SystemExit('Existing release tag points to a different commit; nothing changed.')
+          if release is None:
+              # Do not let an old queued run or rerun publish as the newest release.
+              if api('git/ref/heads/main').get('object', {}).get('sha') != commit:
+                  print('Main has advanced; skipping a new release for this superseded commit.')
+                  raise SystemExit(0)
+              notes = output / 'release-notes.md'
+              notes.write_text('Validated public Mini Planet UI for commit ' + commit + '.\n\n'
+                  'API contract: 1. Includes no owner backend or credentials.\n'
+                  'Applying this UI with the Mac mini updater restarts only the owner server '
+                  'and expires existing owner login sessions.\n')
+              subprocess.run(['gh', 'release', 'create', tag,
+                  str(output / 'owner-ui.tar.gz'), str(output / 'owner-ui.manifest.json'),
+                  '--repo', repository, '--target', commit, '--prerelease', '--latest=false',
+                  '--title', 'Owner UI ' + commit[:12], '--notes-file', str(notes)], check=True)
+              release = api('releases/tags/' + tag)
+
+          if (release.get('tag_name') != tag or release.get('draft') is not False
+                  or release.get('prerelease') is not True):
+              raise SystemExit('Release must be a published prerelease; nothing was overwritten.')
+          assets = release.get('assets', [])
+          if (sorted(asset.get('name', '') for asset in assets) != expected_assets
+                  or any(asset.get('state') != 'uploaded' or asset.get('size', 0) <= 0 for asset in assets)):
+              raise SystemExit('Release assets are incomplete or unexpected; nothing was overwritten.')
+          if api('commits/' + tag).get('sha') != commit:
+              raise SystemExit('Release tag does not match the validated commit.')
+          with tempfile.TemporaryDirectory(prefix='owner-ui-check-', dir=os.environ['RUNNER_TEMP']) as directory:
+              subprocess.run(['gh', 'release', 'download', tag, '--repo', repository,
+                  '--dir', directory, '--pattern', 'owner-ui.tar.gz',
+                  '--pattern', 'owner-ui.manifest.json'], check=True)
+              downloaded = Path(directory)
+              manifest = json.loads((downloaded / 'owner-ui.manifest.json').read_text())
+              digest = hashlib.sha256((downloaded / 'owner-ui.tar.gz').read_bytes()).hexdigest()
+              if (not isinstance(manifest, dict)
+                      or type(manifest.get('schemaVersion')) is not int
+                      or type(manifest.get('apiContract')) is not int
+                      or manifest != expected_manifest or digest != expected_manifest['sha256']):
+                  raise SystemExit('Published assets differ from the validated UI; nothing was overwritten.')
+          print('Verified complete prerelease', tag, '(existing assets are never overwritten).')
+          PY
