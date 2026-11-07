@@ -305,24 +305,25 @@ GitHub Pages on every push to `main` (Settings → Pages → Source: **GitHub Ac
 Any static host (Netlify, Vercel, Cloudflare Pages) can serve the generated `_site` directory.
 HTTPS is required for service workers and the optional weather API.
 
-### Cloudflare Workers
+### Cloudflare Pages
 
 The public domain is `https://planet.handul.dev/`. This deployment is static;
 it does not connect to a Mac mini or expose a Hermes API.
 
 In Cloudflare, open **Compute → Workers & Pages → Create application →
-Continue with GitHub**, then select `Handul7/mini-planet` with these settings:
+Continue to Pages → Import an existing Git repository**, then select
+`Handul7/mini-planet` with these settings:
 
 | Setting | Value |
 | --- | --- |
 | Project name | `mini-planet` |
 | Production branch | `main` |
+| Framework preset | `None` |
 | Root directory | Repository root |
 | Build command | `node scripts/sync-site-metadata.mjs && node scripts/validate-predeploy.mjs && node --test tests/*.test.mjs && node scripts/build-site.mjs && node scripts/validate-site-artifact.mjs _site` |
-| Deploy command | `npx wrangler deploy` |
-| Static assets directory | `./_site` (declared in `wrangler.jsonc`) |
+| Build output directory | `_site` |
 
-After the deployment succeeds, add `planet.handul.dev` under **Settings → Domains & Routes**
+After the deployment succeeds, add `planet.handul.dev` under **Custom domains**
 and wait for the domain and HTTPS certificate to become active. Later pushes to
 `main` trigger a new deployment. Only the allowlisted `_site` artifact is served;
 repository metadata, documentation, tests, and local configuration are excluded.
